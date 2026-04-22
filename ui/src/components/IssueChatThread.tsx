@@ -673,6 +673,7 @@ const IssueChatTextPart = memo(function IssueChatTextPart({ text, recessed }: { 
       className="text-sm leading-6"
       style={recessed ? { opacity: 0.55 } : undefined}
       softBreaks
+      linkWorkspaceFileReferences
       onImageClick={onImageClick}
     >
       {text}
