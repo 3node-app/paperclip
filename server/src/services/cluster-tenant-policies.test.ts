@@ -131,4 +131,53 @@ describe("clusterTenantPoliciesService", () => {
     });
     expect((await svc.get(clusterId, companyId))?.httpProxyUrl).toBeNull();
   });
+
+  it("upsert() persists git_credentials_secret_id, cilium_dns_allowlist, cilium_egress_cidrs", async () => {
+    const svc = clusterTenantPoliciesService(db);
+    // First create a company secret to FK against.
+    const secretRows = await db.execute(sql`
+      INSERT INTO company_secrets (company_id, name)
+      VALUES (${companyId}, 'github-pat')
+      RETURNING id
+    `);
+    const secretId = (secretRows[0] as { id: string }).id;
+
+    const written = await svc.upsert({
+      clusterConnectionId: clusterId,
+      companyId,
+      quota: null,
+      limitRange: null,
+      additionalAllowFqdns: [],
+      imageOverrides: null,
+      gitCredentialsSecretId: secretId,
+      ciliumDnsAllowlist: ["api.anthropic.com", "github.com"],
+      ciliumEgressCidrs: ["10.42.0.0/16"],
+    });
+    expect(written.gitCredentialsSecretId).toBe(secretId);
+    expect(written.ciliumDnsAllowlist).toEqual(["api.anthropic.com", "github.com"]);
+    expect(written.ciliumEgressCidrs).toEqual(["10.42.0.0/16"]);
+
+    const fetched = await svc.get(clusterId, companyId);
+    expect(fetched).not.toBeNull();
+    expect(fetched?.gitCredentialsSecretId).toBe(secretId);
+    expect(fetched?.ciliumDnsAllowlist).toEqual(["api.anthropic.com", "github.com"]);
+    expect(fetched?.ciliumEgressCidrs).toEqual(["10.42.0.0/16"]);
+  });
+
+  it("upsert() preserves new columns when caller omits them", async () => {
+    const svc = clusterTenantPoliciesService(db);
+    // Re-upsert with only quota set; the M3a columns should retain their
+    // previous values rather than reset to defaults.
+    await svc.upsert({
+      clusterConnectionId: clusterId,
+      companyId,
+      quota: { requestsCpu: "8" },
+      limitRange: null,
+      additionalAllowFqdns: [],
+      imageOverrides: null,
+    });
+    const after = await svc.get(clusterId, companyId);
+    expect(after?.gitCredentialsSecretId).not.toBeNull();
+    expect(after?.ciliumDnsAllowlist?.length ?? 0).toBeGreaterThan(0);
+  });
 });

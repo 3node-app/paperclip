@@ -15,12 +15,21 @@ export interface UpsertTenantPolicyInput {
    */
   httpProxyUrl?: string | null;
   imageOverrides: Record<string, string> | null;
+  /** FK to company_secrets.id. Omitted = preserve existing; `null` = clear. */
+  gitCredentialsSecretId?: string | null;
+  /** Cilium DSL: tenant-restrictive FQDN list. Omitted = preserve. Empty array = clear. */
+  ciliumDnsAllowlist?: string[];
+  /** Cilium DSL: tenant-restrictive CIDR list. Omitted = preserve. Empty array = clear. */
+  ciliumEgressCidrs?: string[];
 }
 
 export interface TenantPolicyRow extends TenantPolicy {
   clusterConnectionId: string;
   companyId: string;
   httpProxyUrl: string | null;
+  gitCredentialsSecretId: string | null;
+  ciliumDnsAllowlist: string[];
+  ciliumEgressCidrs: string[];
 }
 
 export interface ClusterTenantPoliciesService {
@@ -39,17 +48,19 @@ export function clusterTenantPoliciesService(db: Db): ClusterTenantPoliciesServi
     },
 
     async upsert(input) {
-      // We still read existing once to implement the preserve-on-omit
-      // semantics for httpProxyUrl. The read is racy w.r.t. another concurrent
-      // upsert, but the write below is unconditionally atomic via
-      // ON CONFLICT — no caller will surface a unique-constraint error from
-      // cluster_tenant_policies_cluster_company_uq. Race semantics under
-      // concurrent (omit, set, set, omit, …) call patterns: an explicit
-      // setter always overwrites an omitter's preserved value, which is the
-      // desired last-explicit-write-wins shape.
+      // Pre-read existing once to implement preserve-on-omit semantics for
+      // httpProxyUrl, gitCredentialsSecretId, ciliumDnsAllowlist, and
+      // ciliumEgressCidrs. The read is racy w.r.t. another concurrent upsert
+      // but the write is unconditionally atomic via ON CONFLICT.
       const existing = await this.get(input.clusterConnectionId, input.companyId);
       const httpProxyUrl =
         input.httpProxyUrl === undefined ? (existing?.httpProxyUrl ?? null) : input.httpProxyUrl;
+      const gitCredentialsSecretId =
+        input.gitCredentialsSecretId === undefined ? (existing?.gitCredentialsSecretId ?? null) : input.gitCredentialsSecretId;
+      const ciliumDnsAllowlist =
+        input.ciliumDnsAllowlist === undefined ? (existing?.ciliumDnsAllowlist ?? []) : input.ciliumDnsAllowlist;
+      const ciliumEgressCidrs =
+        input.ciliumEgressCidrs === undefined ? (existing?.ciliumEgressCidrs ?? []) : input.ciliumEgressCidrs;
       const networkJson = { additionalAllowFqdns: input.additionalAllowFqdns, httpProxyUrl };
 
       const [row] = await db
@@ -61,6 +72,9 @@ export function clusterTenantPoliciesService(db: Db): ClusterTenantPoliciesServi
           limitRangeJson: input.limitRange,
           networkJson,
           imageOverridesJson: input.imageOverrides,
+          gitCredentialsSecretId,
+          ciliumDnsAllowlist,
+          ciliumEgressCidrs,
         })
         .onConflictDoUpdate({
           target: [clusterTenantPolicies.clusterConnectionId, clusterTenantPolicies.companyId],
@@ -69,6 +83,9 @@ export function clusterTenantPoliciesService(db: Db): ClusterTenantPoliciesServi
             limitRangeJson: input.limitRange,
             networkJson,
             imageOverridesJson: input.imageOverrides,
+            gitCredentialsSecretId,
+            ciliumDnsAllowlist,
+            ciliumEgressCidrs,
             updatedAt: new Date(),
           },
         })
@@ -87,5 +104,8 @@ function mapRow(r: typeof clusterTenantPolicies.$inferSelect): TenantPolicyRow {
     additionalAllowFqdns: r.networkJson?.additionalAllowFqdns ?? [],
     httpProxyUrl: r.networkJson?.httpProxyUrl ?? null,
     imageOverrides: r.imageOverridesJson ?? null,
+    gitCredentialsSecretId: r.gitCredentialsSecretId ?? null,
+    ciliumDnsAllowlist: r.ciliumDnsAllowlist ?? [],
+    ciliumEgressCidrs: r.ciliumEgressCidrs ?? [],
   };
 }
