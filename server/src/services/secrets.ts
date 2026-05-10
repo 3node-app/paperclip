@@ -2295,22 +2295,84 @@ export function secretService(db: Db, oauthDeps?: SecretServiceOAuthDeps) {
             e.errorCode = "oauth_provider_unavailable";
             throw e;
           }
-          // Lazy refresh wired in T30. The resolver passes undefined context to
-          // resolveSecretValueInternal so the binding-context check (which
-          // expects a companySecretBindings row) is skipped — the OAuth
-          // connection itself is the consumer record for these secrets.
-          const secretResolution = await resolveSecretValueInternal(
-            companyId,
-            conn.accessTokenSecretId,
-            "latest",
-            undefined,
-          );
-          env[key] = secretResolution.value;
-          manifest.push({
-            ...secretResolution.manifestEntry,
-            configPath: `env.${key}`,
-            envKey: key,
-          });
+          // Lazy refresh: if the access token will expire within the lazy
+          // window AND we have a refresh token on file, attempt a refresh
+          // BEFORE reading the (possibly expired) access secret. On success
+          // we use the freshly-rotated plaintext returned by refreshFn; on
+          // permanent revocation we propagate `oauth_connection_revoked`;
+          // on transient failure we fall back to the existing access secret
+          // unless it's already past expiry, in which case we surface
+          // `oauth_refresh_failed`.
+          const LAZY_WINDOW_MS = 60 * 1000;
+          const expiresInMs = conn.accessTokenExpiresAt
+            ? conn.accessTokenExpiresAt.getTime() - Date.now()
+            : Number.POSITIVE_INFINITY;
+          const needsRefresh =
+            !!conn.refreshTokenSecretId && expiresInMs < LAZY_WINDOW_MS;
+
+          let resolvedAccessToken: string | null = null;
+          if (needsRefresh) {
+            if (!oauthDeps.refreshFn) {
+              const e = new Error(
+                "oauth_refresh_unwired: refreshFn not configured",
+              ) as Error & { errorCode: string };
+              e.errorCode = "oauth_refresh_unwired";
+              throw e;
+            }
+            const refreshResult = await oauthDeps.refreshFn({
+              connectionId: conn.id,
+              db,
+              registry: oauthDeps.registry,
+              secretService: api,
+            });
+            if (refreshResult.outcome === "success") {
+              resolvedAccessToken = refreshResult.accessToken;
+            } else if (refreshResult.outcome === "revoked") {
+              const e = new Error(
+                `oauth_connection_revoked: ${conn.providerId}`,
+              ) as Error & { errorCode: string };
+              e.errorCode = "oauth_connection_revoked";
+              throw e;
+            } else if (expiresInMs <= 0) {
+              // transient or skipped, but the existing token is already
+              // expired — there is nothing safe to fall back to.
+              const e = new Error(
+                `oauth_refresh_failed: ${refreshResult.outcome}`,
+              ) as Error & { errorCode: string };
+              e.errorCode = "oauth_refresh_failed";
+              throw e;
+            }
+            // transient/skipped with non-expired token: fall through and read
+            // the existing secret below.
+          }
+
+          let manifestEntry: RuntimeSecretManifestEntry;
+          if (resolvedAccessToken !== null) {
+            manifestEntry = {
+              configPath: `env.${key}`,
+              envKey: key,
+              secretId: conn.accessTokenSecretId,
+              secretKey: `oauth:${conn.providerId}:access`,
+              version: 0,
+              provider: "local_encrypted",
+              outcome: "success",
+            };
+          } else {
+            const secretResolution = await resolveSecretValueInternal(
+              companyId,
+              conn.accessTokenSecretId,
+              "latest",
+              undefined,
+            );
+            resolvedAccessToken = secretResolution.value;
+            manifestEntry = {
+              ...secretResolution.manifestEntry,
+              configPath: `env.${key}`,
+              envKey: key,
+            };
+          }
+          env[key] = resolvedAccessToken;
+          manifest.push(manifestEntry);
           secretKeys.add(key);
           oauthConnectionIds.add(conn.id);
         }
