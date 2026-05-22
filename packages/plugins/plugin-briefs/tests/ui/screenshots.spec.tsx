@@ -129,15 +129,16 @@ describe.skipIf(!ENABLED)("Briefs screenshots", () => {
 
   it("captures desktop, mobile, and empty-state Briefing snapshots", async () => {
     await fs.mkdir(outDir, { recursive: true });
+    const tmpDir = await fs.mkdtemp(path.join(__dirname, ".tmp-briefs-"));
     const cards = gallery();
 
     const desktopHtml = staticPage({ cards, viewportWidth: desktopWidth });
     const mobileHtml = staticPage({ cards, viewportWidth: mobileWidth });
     const emptyHtml = staticPage({ cards: [], viewportWidth: desktopWidth });
 
-    const desktopFile = path.join(outDir, "_briefing-desktop.html");
-    const mobileFile = path.join(outDir, "_briefing-mobile.html");
-    const emptyFile = path.join(outDir, "_briefing-empty.html");
+    const desktopFile = path.join(tmpDir, "briefing-desktop.html");
+    const mobileFile = path.join(tmpDir, "briefing-mobile.html");
+    const emptyFile = path.join(tmpDir, "briefing-empty.html");
     await fs.writeFile(desktopFile, desktopHtml);
     await fs.writeFile(mobileFile, mobileHtml);
     await fs.writeFile(emptyFile, emptyHtml);
@@ -152,6 +153,7 @@ describe.skipIf(!ENABLED)("Briefs screenshots", () => {
       const stats = await fs.stat(path.join(outDir, name));
       expect(stats.size).toBeGreaterThan(1024);
     }
+    await fs.rm(tmpDir, { recursive: true, force: true });
   }, 60_000);
 });
 
