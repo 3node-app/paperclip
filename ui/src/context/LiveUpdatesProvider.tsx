@@ -653,6 +653,10 @@ function invalidateActivityQueries(
   const actorType = readString(payload.actorType);
   const actorId = readString(payload.actorId);
 
+  if (action?.startsWith("resource_membership.")) {
+    queryClient.invalidateQueries({ queryKey: queryKeys.resourceMemberships.mine(companyId) });
+  }
+
   if (entityType === "issue") {
     queryClient.invalidateQueries({ queryKey: queryKeys.issues.list(companyId) });
     queryClient.invalidateQueries({ queryKey: queryKeys.issues.listMineByMe(companyId) });

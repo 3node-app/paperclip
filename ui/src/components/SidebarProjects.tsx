@@ -21,6 +21,7 @@ import { SIDEBAR_SCROLL_RESET_STATE } from "../lib/navigation-scroll";
 import { queryKeys } from "../lib/queryKeys";
 import { cn, projectRouteRef } from "../lib/utils";
 import { useProjectOrder } from "../hooks/useProjectOrder";
+import { resourceMembershipState, useResourceMemberships } from "../hooks/useResourceMemberships";
 import { BudgetSidebarMarker } from "./BudgetSidebarMarker";
 import { SidebarSection, type SidebarSectionRadioChoice } from "./SidebarSection";
 import { PluginSlotMount, usePluginSlots } from "@/plugins/slots";
@@ -196,6 +197,7 @@ export function SidebarProjects() {
     queryFn: () => projectsApi.list(selectedCompanyId!),
     enabled: !!selectedCompanyId,
   });
+  const membershipsQuery = useResourceMemberships(selectedCompanyId);
   const { data: session } = useQuery({
     queryKey: queryKeys.auth.session,
     queryFn: () => authApi.getSession(),
@@ -218,8 +220,12 @@ export function SidebarProjects() {
   });
 
   const visibleProjects = useMemo(
-    () => (projects ?? []).filter((project: Project) => !project.archivedAt),
-    [projects],
+    () => (projects ?? []).filter((project: Project) => {
+      if (project.archivedAt) return false;
+      if (!membershipsQuery.isSuccess) return true;
+      return resourceMembershipState(membershipsQuery.data, "project", project.id) !== "left";
+    }),
+    [membershipsQuery.data, membershipsQuery.isSuccess, projects],
   );
   const { orderedProjects, persistOrder } = useProjectOrder({
     projects: visibleProjects,

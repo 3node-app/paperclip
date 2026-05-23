@@ -16,6 +16,10 @@ const mockAuthApi = vi.hoisted(() => ({
   getSession: vi.fn(),
 }));
 
+const mockResourceMembershipsApi = vi.hoisted(() => ({
+  listMine: vi.fn(),
+}));
+
 const mockOpenNewProject = vi.hoisted(() => vi.fn());
 const mockSetSidebarOpen = vi.hoisted(() => vi.fn());
 const mockPersistOrder = vi.hoisted(() => vi.fn());
@@ -76,6 +80,10 @@ vi.mock("../api/projects", () => ({
 
 vi.mock("../api/auth", () => ({
   authApi: mockAuthApi,
+}));
+
+vi.mock("../api/resourceMemberships", () => ({
+  resourceMembershipsApi: mockResourceMembershipsApi,
 }));
 
 vi.mock("../hooks/useProjectOrder", () => ({
@@ -238,6 +246,11 @@ describe("SidebarProjects", () => {
       session: { id: "session-1", userId: "user-1" },
       user: { id: "user-1" },
     });
+    mockResourceMembershipsApi.listMine.mockResolvedValue({
+      projectMemberships: {},
+      agentMemberships: {},
+      updatedAt: null,
+    });
   });
 
   afterEach(async () => {
@@ -333,5 +346,26 @@ describe("SidebarProjects", () => {
     await chooseSortMode("Recent");
 
     expect(projectLinkLabels(container)).toEqual(["Charlie", "Bravo", "Alpha"]);
+  });
+
+  it("filters left projects only after membership state loads", async () => {
+    let resolveMemberships!: (value: unknown) => void;
+    mockResourceMembershipsApi.listMine.mockReturnValue(new Promise((resolve) => {
+      resolveMemberships = resolve;
+    }));
+
+    await renderSidebarProjects();
+    expect(projectLinkLabels(container)).toEqual(["Bravo", "Alpha", "Charlie"]);
+
+    await act(async () => {
+      resolveMemberships({
+        projectMemberships: { "project-a": "left" },
+        agentMemberships: {},
+        updatedAt: null,
+      });
+    });
+    await flushReact();
+
+    expect(projectLinkLabels(container)).toEqual(["Bravo", "Charlie"]);
   });
 });

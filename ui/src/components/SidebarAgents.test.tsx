@@ -22,6 +22,10 @@ const mockHeartbeatsApi = vi.hoisted(() => ({
   liveRunsForCompany: vi.fn(),
 }));
 
+const mockResourceMembershipsApi = vi.hoisted(() => ({
+  listMine: vi.fn(),
+}));
+
 const mockOpenNewAgent = vi.hoisted(() => vi.fn());
 const mockPushToast = vi.hoisted(() => vi.fn());
 const mockSetSidebarOpen = vi.hoisted(() => vi.fn());
@@ -89,6 +93,10 @@ vi.mock("../api/auth", () => ({
 
 vi.mock("../api/heartbeats", () => ({
   heartbeatsApi: mockHeartbeatsApi,
+}));
+
+vi.mock("../api/resourceMemberships", () => ({
+  resourceMembershipsApi: mockResourceMembershipsApi,
 }));
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -193,6 +201,11 @@ describe("SidebarAgents", () => {
       user: { id: "user-1" },
     });
     mockHeartbeatsApi.liveRunsForCompany.mockResolvedValue([]);
+    mockResourceMembershipsApi.listMine.mockResolvedValue({
+      projectMemberships: {},
+      agentMemberships: {},
+      updatedAt: null,
+    });
     localStorage.clear();
   });
 
@@ -309,6 +322,31 @@ describe("SidebarAgents", () => {
     await chooseSortMode("Recent");
 
     expect(agentLinkLabels(container)).toEqual(["Bravo", "Charlie", "Alpha"]);
+  });
+
+  it("filters left agents only after membership state loads", async () => {
+    mockAgentsApi.list.mockResolvedValue([
+      makeAgent({ id: "agent-1", name: "Alpha", urlKey: "alpha" }),
+      makeAgent({ id: "agent-2", name: "Beta", urlKey: "beta" }),
+    ]);
+    let resolveMemberships!: (value: unknown) => void;
+    mockResourceMembershipsApi.listMine.mockReturnValue(new Promise((resolve) => {
+      resolveMemberships = resolve;
+    }));
+
+    await renderSidebarAgents();
+    expect(agentLinkLabels(container)).toEqual(["Alpha", "Beta"]);
+
+    await act(async () => {
+      resolveMemberships({
+        projectMemberships: {},
+        agentMemberships: { "agent-1": "left" },
+        updatedAt: null,
+      });
+    });
+    await flushReact();
+
+    expect(agentLinkLabels(container)).toEqual(["Beta"]);
   });
 
   it("shows edit and pause actions for an active sidebar agent", async () => {

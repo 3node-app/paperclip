@@ -8,9 +8,15 @@ import { useBreadcrumbs } from "../context/BreadcrumbContext";
 import { queryKeys } from "../lib/queryKeys";
 import { EntityRow } from "../components/EntityRow";
 import { StatusBadge } from "../components/StatusBadge";
+import { MembershipAction } from "../components/MembershipAction";
 import { EmptyState } from "../components/EmptyState";
 import { PageSkeleton } from "../components/PageSkeleton";
 import { formatDate, projectUrl } from "../lib/utils";
+import {
+  resourceMembershipState,
+  useResourceMembershipMutation,
+  useResourceMemberships,
+} from "../hooks/useResourceMemberships";
 import { Button } from "@/components/ui/button";
 import { ArrowUpDown, Hexagon, Plus } from "lucide-react";
 
@@ -83,6 +89,8 @@ export function Projects() {
     queryFn: () => projectsApi.list(selectedCompanyId!),
     enabled: !!selectedCompanyId,
   });
+  const membershipsQuery = useResourceMemberships(selectedCompanyId);
+  const membershipMutation = useResourceMembershipMutation(selectedCompanyId);
   const projects = useMemo(
     () => (allProjects ?? []).filter((p) => !p.archivedAt),
     [allProjects],
@@ -138,23 +146,50 @@ export function Projects() {
       {projects.length > 0 && (
         <div className="border border-border">
           {sortedProjects.map((project) => (
-            <EntityRow
-              key={project.id}
-              title={project.name}
-              subtitle={project.description ?? undefined}
-              reserveSubtitleSpace
-              to={projectUrl(project)}
-              trailing={
-                <div className="flex items-center gap-3">
-                  {project.targetDate && (
-                    <span className="text-xs text-muted-foreground">
-                      {formatDate(project.targetDate)}
-                    </span>
-                  )}
-                  <StatusBadge status={project.status} />
-                </div>
-              }
-            />
+            (() => {
+              const state = resourceMembershipState(membershipsQuery.data, "project", project.id);
+              const pending = membershipMutation.isPending &&
+                membershipMutation.variables?.resourceType === "project" &&
+                membershipMutation.variables.resourceId === project.id;
+              return (
+                <EntityRow
+                  key={project.id}
+                  title={project.name}
+                  subtitle={project.description ?? undefined}
+                  reserveSubtitleSpace
+                  to={projectUrl(project)}
+                  className={state === "left" ? "group text-foreground/55" : "group"}
+                  trailing={
+                    <div className="flex items-center gap-3">
+                      {project.targetDate && (
+                        <span className="text-xs text-muted-foreground">
+                          {formatDate(project.targetDate)}
+                        </span>
+                      )}
+                      <StatusBadge status={project.status} />
+                      <MembershipAction
+                        state={state}
+                        pending={pending}
+                        pendingState={pending ? membershipMutation.variables?.state : null}
+                        resourceName={project.name}
+                        onJoin={() => membershipMutation.mutate({
+                          resourceType: "project",
+                          resourceId: project.id,
+                          resourceName: project.name,
+                          state: "joined",
+                        })}
+                        onLeave={() => membershipMutation.mutate({
+                          resourceType: "project",
+                          resourceId: project.id,
+                          resourceName: project.name,
+                          state: "left",
+                        })}
+                      />
+                    </div>
+                  }
+                />
+              );
+            })()
           ))}
         </div>
       )}

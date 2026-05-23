@@ -20,6 +20,7 @@ import { SIDEBAR_SCROLL_RESET_STATE } from "../lib/navigation-scroll";
 import { queryKeys } from "../lib/queryKeys";
 import { cn, agentRouteRef, agentUrl } from "../lib/utils";
 import { useAgentOrder } from "../hooks/useAgentOrder";
+import { resourceMembershipState, useResourceMemberships } from "../hooks/useResourceMemberships";
 import {
   AGENT_SORT_MODE_UPDATED_EVENT,
   getAgentSortModeStorageKey,
@@ -211,6 +212,7 @@ export function SidebarAgents() {
     queryKey: queryKeys.auth.session,
     queryFn: () => authApi.getSession(),
   });
+  const membershipsQuery = useResourceMemberships(selectedCompanyId);
 
   const { data: liveRuns } = useQuery({
     queryKey: queryKeys.liveRuns(selectedCompanyId!),
@@ -229,10 +231,15 @@ export function SidebarAgents() {
 
   const visibleAgents = useMemo(() => {
     const filtered = (agents ?? []).filter(
-      (a: Agent) => a.status !== "terminated"
+      (a: Agent) =>
+        a.status !== "terminated" &&
+        (
+          !membershipsQuery.isSuccess ||
+          resourceMembershipState(membershipsQuery.data, "agent", a.id) !== "left"
+        )
     );
     return filtered;
-  }, [agents]);
+  }, [agents, membershipsQuery.data, membershipsQuery.isSuccess]);
   const currentUserId = session?.user?.id ?? session?.session?.userId ?? null;
   const sortModeStorageKey = useMemo(() => {
     if (!selectedCompanyId) return null;
