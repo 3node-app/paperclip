@@ -44,8 +44,9 @@ import {
   getCatalogPackageMetadata,
   getCatalogSkillOrThrow,
   readCatalogSkillFile,
+  resolveCatalogSkillReference,
 } from "./skills-catalog.js";
-import { PORTABLE_CATALOG_PROVENANCE_STRING_KEYS } from "./catalog-provenance.js";
+import { PORTABLE_CATALOG_PROVENANCE_STRING_KEYS, readCatalogStringList } from "./catalog-provenance.js";
 
 type CompanySkillRow = typeof companySkills.$inferSelect;
 type CompanySkillListDbRow = Pick<
@@ -786,12 +787,6 @@ function deriveImportedSkillSlug(frontmatter: Record<string, unknown>, fallback:
     ?? "skill";
 }
 
-function readStringList(value: unknown) {
-  if (!Array.isArray(value)) return null;
-  const entries = value.map((entry) => asString(entry)).filter((entry): entry is string => Boolean(entry));
-  return entries.length === value.length ? entries : null;
-}
-
 function readPortableCatalogProvenance(
   metadata: Record<string, unknown> | null,
   canonicalKey: string | null,
@@ -814,7 +809,7 @@ function readPortableCatalogProvenance(
     if (value) normalized[key] = value;
   }
   if (sourceRef && !normalized.originHash) normalized.originHash = sourceRef;
-  const auditCodes = readStringList(catalog.auditCodes);
+  const auditCodes = readCatalogStringList(catalog.auditCodes);
   if (auditCodes) normalized.auditCodes = auditCodes;
 
   return {
@@ -1355,6 +1350,14 @@ function serializeFileInventory(
 
 function getSkillMeta(skill: Pick<CompanySkill, "metadata">): SkillSourceMeta {
   return isPlainRecord(skill.metadata) ? skill.metadata as SkillSourceMeta : {};
+}
+
+function resolveCatalogSkillIfPresent(reference: string): CatalogSkill | null {
+  const result = resolveCatalogSkillReference(reference);
+  if (result.ambiguous) {
+    throw conflict(`Catalog skill slug "${reference}" is ambiguous. Use an id or key.`);
+  }
+  return result.skill;
 }
 
 function getMissingSourceMarker(metadata: Record<string, unknown> | null): Record<string, unknown> | null {
@@ -2206,7 +2209,18 @@ export function companySkillService(db: Db) {
           ...statusMeta,
         };
       }
-      const catalogSkill = getCatalogSkillOrThrow(catalogId);
+      const catalogSkill = resolveCatalogSkillIfPresent(catalogId);
+      if (!catalogSkill) {
+        return {
+          supported: false,
+          reason: "Catalog entry is no longer available in the shipped manifest.",
+          trackingRef: catalogId,
+          currentRef: skill.sourceRef ?? statusMeta.originHash,
+          latestRef: null,
+          hasUpdate: false,
+          ...statusMeta,
+        };
+      }
       return {
         supported: true,
         reason: null,
@@ -2426,7 +2440,12 @@ export function companySkillService(db: Db) {
       if (!catalogId) {
         throw unprocessable("Catalog skill metadata is incomplete.");
       }
-      const catalogSkill = getCatalogSkillOrThrow(catalogId);
+      const catalogSkill = resolveCatalogSkillIfPresent(catalogId);
+      if (!catalogSkill) {
+        throw unprocessable("Catalog entry is no longer available in the shipped manifest.", {
+          updateHoldReason: "origin_unavailable",
+        });
+      }
       assertCatalogSkillInstallable(catalogSkill);
       const originSnapshotLocator = await materializeCatalogOriginSnapshot(companyId, catalogSkill, skill.slug);
       const snapshotSkill = {
@@ -2546,7 +2565,7 @@ export function companySkillService(db: Db) {
       : null;
     if (!sourceDir) {
       const catalogId = asString(metadata.catalogId);
-      const catalogSkill = catalogId ? getCatalogSkillOrThrow(catalogId) : null;
+      const catalogSkill = catalogId ? resolveCatalogSkillIfPresent(catalogId) : null;
       if (catalogSkill?.contentHash === originHash) {
         sourceDir = await materializeCatalogOriginSnapshot(companyId, catalogSkill, skill.slug);
       }

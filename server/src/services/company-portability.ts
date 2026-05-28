@@ -70,7 +70,7 @@ import { issueService } from "./issues.js";
 import { projectService } from "./projects.js";
 import { routineService } from "./routines.js";
 import { secretService } from "./secrets.js";
-import { PORTABLE_CATALOG_PROVENANCE_STRING_KEYS } from "./catalog-provenance.js";
+import { PORTABLE_CATALOG_PROVENANCE_STRING_KEYS, readCatalogStringList } from "./catalog-provenance.js";
 
 /** Build OrgNode tree from manifest agent list (slug + reportsToSlug). */
 function buildOrgTreeFromManifest(agents: CompanyPortabilityManifest["agents"]): OrgNode[] {
@@ -229,12 +229,6 @@ function readSkillSourceKind(skill: CompanySkill) {
   return asString(metadata?.sourceKind);
 }
 
-function readStringList(value: unknown) {
-  if (!Array.isArray(value)) return null;
-  const entries = value.map((entry) => asString(entry)).filter((entry): entry is string => Boolean(entry));
-  return entries.length === value.length ? entries : null;
-}
-
 function buildPortableCatalogProvenance(skill: CompanySkill) {
   if (skill.sourceType !== "catalog") return null;
   const metadata = isPlainRecord(skill.metadata) ? skill.metadata : null;
@@ -251,7 +245,7 @@ function buildPortableCatalogProvenance(skill: CompanySkill) {
     if (value) provenance[key] = value;
   }
 
-  const auditCodes = readStringList(metadata?.auditCodes);
+  const auditCodes = readCatalogStringList(metadata?.auditCodes);
   if (auditCodes) provenance.auditCodes = auditCodes;
 
   return Object.keys(provenance).length > 1 ? provenance : null;
@@ -274,7 +268,7 @@ function readPortableCatalogProvenance(metadata: Record<string, unknown> | null)
     if (value) normalized[key] = value;
   }
   if (sourceRef && !normalized.originHash) normalized.originHash = sourceRef;
-  const auditCodes = readStringList(catalog.auditCodes);
+  const auditCodes = readCatalogStringList(catalog.auditCodes);
   if (auditCodes) normalized.auditCodes = auditCodes;
 
   return {

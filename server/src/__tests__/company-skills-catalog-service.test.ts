@@ -56,6 +56,7 @@ const mockCatalogService = vi.hoisted(() => ({
     packageVersion: "0.3.1",
   })),
   getCatalogSkillOrThrow: vi.fn(),
+  resolveCatalogSkillReference: vi.fn(),
   readCatalogSkillFile: vi.fn(),
   copyCatalogSkillFile: vi.fn(),
 }));
@@ -106,6 +107,10 @@ describeEmbeddedPostgres("companySkillService.installFromCatalog", () => {
     cleanupDirs.add(home);
     process.env.PAPERCLIP_HOME = home;
     mockCatalogService.getCatalogSkillOrThrow.mockReturnValue(sampleCatalogSkill);
+    mockCatalogService.resolveCatalogSkillReference.mockReturnValue({
+      skill: sampleCatalogSkill,
+      ambiguous: false,
+    });
     mockCatalogService.readCatalogSkillFile.mockImplementation(async (_ref: string, filePath: string) => ({
       catalogSkillId: sampleCatalogSkill.id,
       path: filePath,
@@ -299,6 +304,25 @@ describeEmbeddedPostgres("companySkillService.installFromCatalog", () => {
       auditVerdict: "warning",
     });
     expect(status?.installedHash).not.toBe(sampleCatalogSkill.contentHash);
+  });
+
+  it("returns unsupported update status when the catalog entry is no longer shipped", async () => {
+    const companyId = await createCompany();
+    const installed = await svc.installFromCatalog(companyId, { catalogSkillId: sampleCatalogSkill.id });
+    mockCatalogService.resolveCatalogSkillReference.mockReturnValue({
+      skill: null,
+      ambiguous: false,
+    });
+
+    const status = await svc.updateStatus(companyId, installed.skill.id);
+
+    expect(status).toMatchObject({
+      supported: false,
+      reason: "Catalog entry is no longer available in the shipped manifest.",
+      trackingRef: sampleCatalogSkill.id,
+      latestRef: null,
+      hasUpdate: false,
+    });
   });
 
   it("clears stale local modification hold status when catalog files are restored", async () => {
