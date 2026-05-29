@@ -67,6 +67,14 @@ test("findGitPushOffenses flags args-array form passed to spawn/execFile", () =>
   }
 });
 
+test("findGitPushOffenses ignores `git push` in a comment after a string ending with a literal backslash", () => {
+  // The closing `"` after `\\` should end the string (even literal count of
+  // backslashes leaves the quote unescaped), so the `// git push` that
+  // follows is comment text and must be stripped.
+  const text = 'const path = "C:\\\\"; // git push origin master\nconst y = 2;\n';
+  assert.deepEqual(findGitPushOffenses(text), []);
+});
+
 test("findGitPushOffenses does not flag args-array form when allow marker is present", () => {
   const text = `// ${ALLOW_MARKER}: release tooling adapter\nspawn("git", ["push", "origin", "main"]);\n`;
   assert.deepEqual(findGitPushOffenses(text), []);

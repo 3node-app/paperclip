@@ -69,11 +69,18 @@ function stripLineComment(line) {
 
   for (let index = 0; index < line.length; index += 1) {
     const char = line[index];
-    const prev = index > 0 ? line[index - 1] : "";
+    // A character is escaped only if it's preceded by an odd number of
+    // backslashes; e.g. `"foo\\"` ends a string because the trailing `\\`
+    // is a single escaped backslash, leaving the closing `"` unescaped.
+    let backslashes = 0;
+    for (let scan = index - 1; scan >= 0 && line[scan] === "\\"; scan -= 1) {
+      backslashes += 1;
+    }
+    const isEscaped = backslashes % 2 === 1;
 
-    if (!inDouble && !inBacktick && char === "'" && prev !== "\\") inSingle = !inSingle;
-    else if (!inSingle && !inBacktick && char === '"' && prev !== "\\") inDouble = !inDouble;
-    else if (!inSingle && !inDouble && char === "`" && prev !== "\\") inBacktick = !inBacktick;
+    if (!inDouble && !inBacktick && char === "'" && !isEscaped) inSingle = !inSingle;
+    else if (!inSingle && !inBacktick && char === '"' && !isEscaped) inDouble = !inDouble;
+    else if (!inSingle && !inDouble && char === "`" && !isEscaped) inBacktick = !inBacktick;
     else if (!inSingle && !inDouble && !inBacktick && char === "/" && line[index + 1] === "/") {
       return line.slice(0, index);
     }
