@@ -224,6 +224,11 @@ export function Agents() {
                   resourceMembershipState(membershipsQuery.data, "agent", agent.id) === "left" ? "text-foreground/55" : "",
                 )}
                 leading={<AgentStatusCapsule status={agent.status} />}
+                meta={
+                  <div className="hidden xl:flex items-center gap-3">
+                    <AgentMetaColumns agent={agent} />
+                  </div>
+                }
                 trailing={
                   <div className="flex items-center gap-3">
                     <span className="sm:hidden">
@@ -245,18 +250,6 @@ export function Agents() {
                           liveCount={liveRunByAgent.get(agent.id)!.liveCount}
                         />
                       )}
-                      <span className="hidden 2xl:inline w-28 whitespace-nowrap text-left font-mono text-xs text-muted-foreground">
-                        {getAdapterLabel(agent.adapterType)}
-                      </span>
-                      <span
-                        className="hidden 2xl:inline w-36 truncate text-left font-mono text-xs text-muted-foreground"
-                        title={getConfiguredModel(agent) ?? undefined}
-                      >
-                        {getConfiguredModel(agent) ?? "—"}
-                      </span>
-                      <span className="text-xs text-muted-foreground w-16 text-right">
-                        {agent.lastHeartbeatAt ? relativeTime(agent.lastHeartbeatAt) : "—"}
-                      </span>
                       <span className="w-20 flex justify-end">
                         <AgentStatusBadge status={agent.status} />
                       </span>
@@ -413,20 +406,9 @@ function OrgTreeNode({
               />
             )}
             {agent && (
-              <>
-                <span className="hidden 2xl:inline w-28 whitespace-nowrap text-left font-mono text-xs text-muted-foreground">
-                  {getAdapterLabel(agent.adapterType)}
-                </span>
-                <span
-                  className="hidden 2xl:inline w-36 truncate text-left font-mono text-xs text-muted-foreground"
-                  title={getConfiguredModel(agent) ?? undefined}
-                >
-                  {getConfiguredModel(agent) ?? "—"}
-                </span>
-                <span className="text-xs text-muted-foreground w-16 text-right">
-                  {agent.lastHeartbeatAt ? relativeTime(agent.lastHeartbeatAt) : "—"}
-                </span>
-              </>
+              <div className="hidden xl:flex items-center gap-3">
+                <AgentMetaColumns agent={agent} />
+              </div>
             )}
             <span className="w-20 flex justify-end">
               <AgentStatusBadge status={node.status} />
@@ -469,6 +451,36 @@ function OrgTreeNode({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Provider/model + heartbeat columns shared by the list and org views. The
+ * model and adapter label share one fixed-width cell, each line truncating with
+ * an ellipsis so a long model id can never overlap the heartbeat column. The
+ * heartbeat is single-line (`whitespace-nowrap`) and wide enough for a full
+ * date like "Apr 30, 2026".
+ */
+function AgentMetaColumns({ agent }: { agent: Agent }) {
+  const model = getConfiguredModel(agent);
+  const adapterLabel = getAdapterLabel(agent.adapterType);
+  return (
+    <>
+      <div className="w-44 min-w-0 leading-tight">
+        <div
+          className="truncate font-mono text-xs text-muted-foreground"
+          title={model ?? undefined}
+        >
+          {model ?? "—"}
+        </div>
+        <div className="truncate font-mono text-[11px] text-muted-foreground/70" title={adapterLabel}>
+          {adapterLabel}
+        </div>
+      </div>
+      <span className="w-24 whitespace-nowrap text-right text-xs text-muted-foreground">
+        {agent.lastHeartbeatAt ? relativeTime(agent.lastHeartbeatAt) : "—"}
+      </span>
+    </>
   );
 }
 

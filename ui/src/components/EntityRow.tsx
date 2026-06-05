@@ -7,6 +7,12 @@ interface EntityRowProps {
   identifier?: string;
   title: string;
   subtitle?: string;
+  /**
+   * Optional metadata columns rendered immediately after the title. When set,
+   * the title stops flex-growing and a spacer is inserted between `meta` and
+   * `trailing`, so meta sits next to the name while trailing stays pinned right.
+   */
+  meta?: ReactNode;
   trailing?: ReactNode;
   selected?: boolean;
   to?: string;
@@ -21,6 +27,7 @@ export function EntityRow({
   identifier,
   title,
   subtitle,
+  meta,
   trailing,
   selected,
   to,
@@ -40,7 +47,7 @@ export function EntityRow({
   const content = (
     <>
       {leading && <div className="flex items-center gap-2 shrink-0">{leading}</div>}
-      <div className={cn("flex-1 min-w-0", titleClassName)}>
+      <div className={cn("min-w-0", !meta && "flex-1", titleClassName)}>
         <div className="flex items-center gap-2">
           {identifier && (
             <span className="text-xs text-muted-foreground font-mono shrink-0 relative top-[1px]">
@@ -58,6 +65,8 @@ export function EntityRow({
           </p>
         )}
       </div>
+      {meta && <div className="flex items-center gap-2 shrink-0">{meta}</div>}
+      {meta && <div className="flex-1" />}
       {trailing && <div className="flex items-center gap-2 shrink-0">{trailing}</div>}
     </>
   );

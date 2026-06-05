@@ -126,7 +126,11 @@ describe("Agents", () => {
     });
 
     mockAgentsApi.list.mockResolvedValue([
-      makeAgent({ adapterConfig: { model: "gpt-5.4" } }),
+      makeAgent({
+        adapterConfig: { model: "gpt-5.4" },
+        // Old enough that relativeTime() falls back to an absolute date string.
+        lastHeartbeatAt: new Date("2026-01-15T00:00:00Z"),
+      }),
     ]);
     mockAgentsApi.org.mockResolvedValue([
       {
@@ -180,5 +184,11 @@ describe("Agents", () => {
 
     expect(container.textContent).toContain("codex_local");
     expect(container.textContent).toContain("gpt-5.4");
+
+    // The heartbeat cell must render on a single line so full dates like
+    // "Apr 30, 2026" never wrap (PAP-85 defect #2).
+    const heartbeatCell = container.querySelector(".whitespace-nowrap.w-24");
+    expect(heartbeatCell).not.toBeNull();
+    expect(heartbeatCell?.textContent).not.toContain("\n");
   });
 });
