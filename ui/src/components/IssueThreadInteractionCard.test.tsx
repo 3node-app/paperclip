@@ -460,6 +460,43 @@ describe("IssueThreadInteractionCard", () => {
     expect(host.textContent).toContain("+34 more");
   });
 
+  it("expands the hidden accepted selections when the +N more chip is clicked", () => {
+    const host = renderCard({
+      interaction: acceptedManyRequestCheckboxConfirmationInteraction,
+    });
+
+    const countSelectedChips = () =>
+      Array.from(host.querySelectorAll("*")).filter(
+        (node) => node.children.length === 0 && node.textContent?.trim().startsWith("Selected:"),
+      ).length;
+
+    expect(countSelectedChips()).toBe(8);
+
+    const moreButton = Array.from(host.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("+34 more"),
+    );
+    expect(moreButton).toBeTruthy();
+
+    act(() => {
+      moreButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(host.textContent).not.toContain("+34 more");
+    expect(countSelectedChips()).toBe(42);
+
+    const showLessButton = Array.from(host.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Show less"),
+    );
+    expect(showLessButton).toBeTruthy();
+
+    act(() => {
+      showLessButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+
+    expect(countSelectedChips()).toBe(8);
+    expect(host.textContent).toContain("+34 more");
+  });
+
   it("stays compact and scrollable with around 100 options", () => {
     const host = renderCard({
       interaction: manyOptionsRequestCheckboxConfirmationInteraction,
