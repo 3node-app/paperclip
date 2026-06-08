@@ -68,19 +68,38 @@ describe("remarkWorkspaceFileRefs", () => {
     expect(parsed?.column).toBe(2);
   });
 
-  it("does not descend into existing links", () => {
+  it("converts linked inline-code file paths into workspace-file links", () => {
+    const tree: MarkdownNode = {
+      type: "paragraph",
+      children: [
+        {
+          type: "link",
+          url: "/PAP/issues/PAP-10306",
+          children: [inlineCode("ui/src/a.ts:1")],
+        },
+      ],
+    };
+    runPlugin(tree);
+    const link = tree.children![0];
+    expect(link.type).toBe("link");
+    expect(link.url?.startsWith("workspace-file:")).toBe(true);
+    expect(parseWorkspaceFileHref(link.url)?.path).toBe("ui/src/a.ts");
+  });
+
+  it("does not descend into existing links with mixed labels", () => {
     const tree: MarkdownNode = {
       type: "paragraph",
       children: [
         {
           type: "link",
           url: "https://example.com",
-          children: [inlineCode("ui/src/a.ts:1")],
+          children: [textNode("see "), inlineCode("ui/src/a.ts:1")],
         },
       ],
     };
     runPlugin(tree);
-    const inner = tree.children![0].children![0];
-    expect(inner.type).toBe("inlineCode");
+    const link = tree.children![0];
+    expect(link.url).toBe("https://example.com");
+    expect(link.children![1]?.type).toBe("inlineCode");
   });
 });

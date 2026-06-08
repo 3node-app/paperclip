@@ -1,8 +1,7 @@
 import type { MouseEvent } from "react";
-import { useMemo } from "react";
-import { useLocation } from "@/lib/router";
-import { readFileViewerStateFromSearch, useFileViewer, writeFileViewerStateToSearch } from "@/context/FileViewerContext";
+import { readFileViewerStateFromSearch, useFileViewer } from "@/context/FileViewerContext";
 import { parseWorkspaceFileRef } from "@/lib/workspace-file-parser";
+import { buildWorkspaceFileHref } from "@/lib/remark-workspace-file-refs";
 import { MarkdownBody } from "./MarkdownBody";
 
 type MarkdownBodyProps = Parameters<typeof MarkdownBody>[0];
@@ -13,18 +12,11 @@ function escapeMarkdownLinkLabel(value: string) {
   return value.replace(/([\\\]])/g, "\\$1");
 }
 
-export function linkWorkspaceFileInlineCode(markdown: string, currentPathname: string, currentSearch: string, currentHash: string) {
+export function linkWorkspaceFileInlineCode(markdown: string, _currentPathname: string, _currentSearch: string, _currentHash: string) {
   return markdown.replace(INLINE_CODE_RE, (token, rawCode: string) => {
     const ref = parseWorkspaceFileRef(rawCode);
     if (!ref) return token;
-    const nextSearch = writeFileViewerStateToSearch(currentSearch, {
-      path: ref.path,
-      line: ref.line,
-      column: ref.column,
-      workspace: "auto",
-    });
-    const href = `${currentPathname}${nextSearch}${currentHash}`;
-    return `[\`${escapeMarkdownLinkLabel(ref.raw)}\`](${href})`;
+    return `[\`${escapeMarkdownLinkLabel(ref.raw)}\`](${buildWorkspaceFileHref(ref)})`;
   });
 }
 
@@ -32,12 +24,7 @@ export function WorkspaceFileMarkdownBody({
   children,
   ...props
 }: MarkdownBodyProps) {
-  const location = useLocation();
   const viewer = useFileViewer();
-  const linkedMarkdown = useMemo(
-    () => linkWorkspaceFileInlineCode(children, location.pathname, location.search, location.hash),
-    [children, location.hash, location.pathname, location.search],
-  );
 
   const handleClick = (event: MouseEvent<HTMLDivElement>) => {
     if (!viewer) return;
@@ -46,7 +33,7 @@ export function WorkspaceFileMarkdownBody({
     if (!anchor) return;
 
     const url = new URL(anchor.href, window.location.href);
-    if (url.origin !== window.location.origin || url.pathname !== location.pathname) return;
+    if (url.origin !== window.location.origin || url.pathname !== window.location.pathname) return;
     const next = readFileViewerStateFromSearch(url.search);
     if (!next) return;
 
@@ -56,7 +43,7 @@ export function WorkspaceFileMarkdownBody({
 
   return (
     <div onClick={handleClick}>
-      <MarkdownBody {...props}>{linkedMarkdown}</MarkdownBody>
+      <MarkdownBody {...props} linkWorkspaceFileRefs>{children}</MarkdownBody>
     </div>
   );
 }

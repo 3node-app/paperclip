@@ -13,7 +13,7 @@ describe("linkWorkspaceFileInlineCode", () => {
     );
 
     expect(markdown).toContain("[`ui/src/pages/IssueDetail.tsx:42`](");
-    expect(markdown).toContain("/issues/PAP-1?tab=chat&file=ui%2Fsrc%2Fpages%2FIssueDetail.tsx&line=42#comment-1");
+    expect(markdown).toContain("workspace-file:?path=ui%2Fsrc%2Fpages%2FIssueDetail.tsx&line=42");
   });
 
   it("leaves non-file inline code unchanged", () => {

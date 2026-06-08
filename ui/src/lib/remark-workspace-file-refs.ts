@@ -45,10 +45,26 @@ function createWorkspaceFileLinkNode(ref: ParsedWorkspaceFileRef): MarkdownNode 
   };
 }
 
+function parseSingleInlineCodeFileRef(node: MarkdownNode): ParsedWorkspaceFileRef | null {
+  if (!Array.isArray(node.children) || node.children.length !== 1) return null;
+  const [child] = node.children;
+  if (child?.type !== "inlineCode" || typeof child.value !== "string") return null;
+  return parseWorkspaceFileRef(child.value);
+}
+
 function rewriteMarkdownTree(node: MarkdownNode) {
   if (!Array.isArray(node.children) || node.children.length === 0) return;
-  // Don't descend into existing links or code blocks; only rewrite inlineCode within flowing text.
-  if (node.type === "link" || node.type === "linkReference" || node.type === "code" || node.type === "definition" || node.type === "html") {
+  // Existing links whose whole label is a workspace-file code span should become
+  // file-viewer links instead of issue/external links.
+  if (node.type === "link") {
+    const ref = parseSingleInlineCodeFileRef(node);
+    if (ref) {
+      node.url = buildWorkspaceFileHref(ref);
+    }
+    return;
+  }
+  // Don't descend into other link-like or code blocks; only rewrite inlineCode within flowing text.
+  if (node.type === "linkReference" || node.type === "code" || node.type === "definition" || node.type === "html") {
     return;
   }
 
