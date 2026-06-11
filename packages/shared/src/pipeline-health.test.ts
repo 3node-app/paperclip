@@ -56,7 +56,9 @@ describe("computePipelineHealth", () => {
     );
     const codes = report.warnings.map((w) => w.code);
     expect(codes).toContain("paused_agent");
-    expect(report.warnings[0]?.message).toContain("Robin");
+    expect(report.warnings[0]?.message).toBe(
+      "Robin is paused, so this step won't run until they're back. Reassign it if you can't wait.",
+    );
     expect(report.warnings[0]?.message).not.toMatch(/routine|dispatch|JWT|invokable/i);
   });
 
@@ -64,14 +66,20 @@ describe("computePipelineHealth", () => {
     const report = computePipelineHealth(
       baseInput([stage({ config: { assigneeAgentId: "ghost" }, instructionsBody: "Go." })]),
     );
-    expect(report.warnings.map((w) => w.code)).toContain("paused_agent");
+    const ghost = report.warnings.find((w) => w.code === "paused_agent");
+    expect(ghost?.message).toBe(
+      "Assigned to a teammate who's no longer here. Pick someone else to run this step.",
+    );
   });
 
   it("warns when a teammate is assigned but there are no instructions", () => {
     const report = computePipelineHealth(
       baseInput([stage({ config: { assigneeAgentId: AGENTS.active.id }, instructionsBody: "" })]),
     );
-    expect(report.warnings.map((w) => w.code)).toContain("automation_no_instructions");
+    const warning = report.warnings.find((w) => w.code === "automation_no_instructions");
+    expect(warning?.message).toBe(
+      "Assigned to a teammate, but there are no instructions yet. Add instructions so this step doesn't stall.",
+    );
   });
 
   it("warns when a review stage has no approver set", () => {
@@ -80,7 +88,8 @@ describe("computePipelineHealth", () => {
         stage({ kind: "review", config: { requireApproval: true, approver: { kind: "agent" } } }),
       ]),
     );
-    expect(report.warnings.map((w) => w.code)).toContain("review_no_approver");
+    const warning = report.warnings.find((w) => w.code === "review_no_approver");
+    expect(warning?.message).toBe("No approver picked yet, so work will pile up here. Choose who approves.");
   });
 
   it("warns when the review approver agent is paused", () => {
@@ -90,7 +99,9 @@ describe("computePipelineHealth", () => {
       ]),
     );
     const warning = report.warnings.find((w) => w.code === "review_no_approver");
-    expect(warning?.message).toContain("Robin");
+    expect(warning?.message).toBe(
+      "Robin is the approver and they're paused, so nothing can be approved until they're back.",
+    );
   });
 
   it("does not warn for an any_human review stage", () => {
@@ -105,7 +116,10 @@ describe("computePipelineHealth", () => {
     const report = computePipelineHealth(
       baseInput([stage({ instructionsBody: `Create cases in [Gone](${href}).` })]),
     );
-    expect(report.warnings.map((w) => w.code)).toContain("missing_pipeline_reference");
+    const warning = report.warnings.find((w) => w.code === "missing_pipeline_reference");
+    expect(warning?.message).toBe(
+      "These instructions hand off to a workflow that's been deleted. Point them at one that exists.",
+    );
   });
 
   it("warns when instructions reference a missing stage of a real pipeline", () => {
@@ -113,7 +127,10 @@ describe("computePipelineHealth", () => {
     const report = computePipelineHealth(
       baseInput([stage({ instructionsBody: `Hand off to [Prod](${href}).` })]),
     );
-    expect(report.warnings.map((w) => w.code)).toContain("missing_stage_reference");
+    const warning = report.warnings.find((w) => w.code === "missing_stage_reference");
+    expect(warning?.message).toBe(
+      'These instructions hand off to a step that no longer exists in "Content Production". Point them at one that does.',
+    );
   });
 
   it("does not warn for a valid pipeline + stage reference", () => {
@@ -138,7 +155,7 @@ describe("computePipelineHealth", () => {
       ]),
     );
     const warning = report.warnings.find((w) => w.code === "unset_required_variable");
-    expect(warning?.message).toContain("Release notes");
+    expect(warning?.message).toBe('"Release notes" is empty. Fill it in so this step can run.');
     // The optional variable does not warn.
     expect(report.warnings.filter((w) => w.code === "unset_required_variable")).toHaveLength(1);
   });

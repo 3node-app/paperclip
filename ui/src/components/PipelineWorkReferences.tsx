@@ -67,7 +67,8 @@ function WorkReferenceRow({ reference }: { reference: WorkReference }) {
     <div className="flex items-start gap-2 text-sm text-foreground">
       <FolderGit2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
       <span className="min-w-0">
-        <span className="font-medium">{reference.label}</span>
+        <span className="block text-xs text-muted-foreground">Folder</span>
+        <span className="font-normal">{reference.label}</span>
         {reference.path ? (
           <span className="block truncate font-mono text-xs text-muted-foreground">{reference.path}</span>
         ) : null}

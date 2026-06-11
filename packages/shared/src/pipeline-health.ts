@@ -138,13 +138,13 @@ export function computePipelineHealth(input: PipelineHealthInput): PipelineHealt
         warnings.push({
           ...anchor,
           code: "paused_agent",
-          message: `This step is assigned to a teammate who's no longer here, so it won't run. Pick someone else to run it.`,
+          message: `Assigned to a teammate who's no longer here. Pick someone else to run this step.`,
         });
       } else if (!isAgentStatusInvokable(agent.status)) {
         warnings.push({
           ...anchor,
           code: "paused_agent",
-          message: `This step is assigned to ${agentLabel(agent)}, who's paused right now, so it won't run until they're active again.`,
+          message: `${agentLabel(agent)} is paused, so this step won't run until they're back. Reassign it if you can't wait.`,
         });
       }
     }
@@ -154,7 +154,7 @@ export function computePipelineHealth(input: PipelineHealthInput): PipelineHealt
       warnings.push({
         ...anchor,
         code: "automation_no_instructions",
-        message: `This step has a teammate assigned but no instructions to follow, so nothing will happen when work arrives here.`,
+        message: `Assigned to a teammate, but there are no instructions yet. Add instructions so this step doesn't stall.`,
       });
     }
 
@@ -170,20 +170,20 @@ export function computePipelineHealth(input: PipelineHealthInput): PipelineHealt
           warnings.push({
             ...anchor,
             code: "review_no_approver",
-            message: `This approval step doesn't have anyone set to approve, so work will pile up here. Choose who approves.`,
+            message: `No approver picked yet, so work will pile up here. Choose who approves.`,
           });
         } else if (!isAgentStatusInvokable(agent.status)) {
           warnings.push({
             ...anchor,
             code: "review_no_approver",
-            message: `The approver for this step, ${agentLabel(agent)}, is paused right now, so nothing can be approved until they're active again.`,
+            message: `${agentLabel(agent)} is the approver and they're paused, so nothing can be approved until they're back.`,
           });
         }
       } else if (kind === "user" && !approverId) {
         warnings.push({
           ...anchor,
           code: "review_no_approver",
-          message: `This approval step doesn't have anyone set to approve, so work will pile up here. Choose who approves.`,
+          message: `No approver picked yet, so work will pile up here. Choose who approves.`,
         });
       }
     }
@@ -196,7 +196,7 @@ export function computePipelineHealth(input: PipelineHealthInput): PipelineHealt
           warnings.push({
             ...anchor,
             code: "missing_pipeline_reference",
-            message: `These instructions point to a workflow that's been deleted, so this hand-off won't work. Update the link to an existing workflow.`,
+            message: `These instructions hand off to a workflow that's been deleted. Point them at one that exists.`,
           });
           continue;
         }
@@ -204,7 +204,7 @@ export function computePipelineHealth(input: PipelineHealthInput): PipelineHealt
           warnings.push({
             ...anchor,
             code: "missing_stage_reference",
-            message: `These instructions point to a step that no longer exists in "${target.name}", so this hand-off won't work. Update the link to an existing step.`,
+            message: `These instructions hand off to a step that no longer exists in "${target.name}". Point them at one that does.`,
           });
         }
       }
@@ -221,7 +221,7 @@ export function computePipelineHealth(input: PipelineHealthInput): PipelineHealt
         warnings.push({
           ...anchor,
           code: "unset_required_variable",
-          message: `This step needs "${readVariableLabel(entry, name)}" filled in before it can run.`,
+          message: `"${readVariableLabel(entry, name)}" is empty. Fill it in so this step can run.`,
         });
       }
     }

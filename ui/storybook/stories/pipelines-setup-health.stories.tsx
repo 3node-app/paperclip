@@ -16,38 +16,61 @@ const BOARD_WARNINGS: PipelineHealthWarning[] = [
     stageId: "stage-drafting",
     stageKey: "drafting",
     stageName: "Drafting",
-    message:
-      "This step is assigned to Robin, who's paused right now, so it won't run until they're active again.",
+    message: "Robin is paused, so this step won't run until they're back. Reassign it if you can't wait.",
   },
   {
     code: "automation_no_instructions",
     stageId: "stage-assets",
     stageKey: "assets",
     stageName: "Assets",
-    message:
-      "This step has a teammate assigned but no instructions to follow, so nothing will happen when work arrives here.",
+    message: "Assigned to a teammate, but there are no instructions yet. Add instructions so this step doesn't stall.",
   },
   {
     code: "review_no_approver",
     stageId: "stage-final-review",
     stageKey: "final_review",
     stageName: "Final review",
-    message: "This approval step doesn't have anyone set to approve, so work will pile up here. Choose who approves.",
+    message: "No approver picked yet, so work will pile up here. Choose who approves.",
   },
   {
     code: "missing_pipeline_reference",
     stageId: "stage-assets",
     stageKey: "assets",
     stageName: "Assets",
-    message:
-      "These instructions point to a workflow that's been deleted, so this hand-off won't work. Update the link to an existing workflow.",
+    message: "These instructions hand off to a workflow that's been deleted. Point them at one that exists.",
   },
   {
     code: "unset_required_variable",
     stageId: "stage-intake",
     stageKey: "intake",
     stageName: "Intake",
-    message: 'This step needs "Release notes" filled in before it can run.',
+    message: '"Release notes" is empty. Fill it in so this step can run.',
+  },
+];
+
+/** A busier pipeline whose warning count exceeds the board-bar cap. */
+const MANY_BOARD_WARNINGS: PipelineHealthWarning[] = [
+  ...BOARD_WARNINGS,
+  {
+    code: "paused_agent",
+    stageId: "stage-edit",
+    stageKey: "edit",
+    stageName: "Edit",
+    message: "Assigned to a teammate who's no longer here. Pick someone else to run this step.",
+  },
+  {
+    code: "missing_stage_reference",
+    stageId: "stage-edit",
+    stageKey: "edit",
+    stageName: "Edit",
+    message: 'These instructions hand off to a step that no longer exists in "Content Production". Point them at one that does.',
+  },
+  {
+    code: "review_no_approver",
+    stageId: "stage-legal",
+    stageKey: "legal",
+    stageName: "Legal review",
+    message: "Casey is the approver and they're paused, so nothing can be approved until they're back.",
   },
 ];
 
@@ -69,6 +92,22 @@ export const BoardHeaderWarningBar: StoryObj = {
         </div>
       </div>
       <PipelineHealthBar warnings={BOARD_WARNINGS} onSelectStage={() => {}} />
+    </div>
+  ),
+};
+
+/** The same bar on a busy pipeline: capped at 5, with a "+n more" trailing line. */
+export const BoardHeaderWarningBarCapped: StoryObj = {
+  render: () => (
+    <div className="w-full max-w-5xl space-y-4">
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Pipeline</p>
+          <h1 className="text-2xl font-semibold text-foreground">Content Production</h1>
+          <p className="mt-1 text-xs text-muted-foreground">12 total items</p>
+        </div>
+      </div>
+      <PipelineHealthBar warnings={MANY_BOARD_WARNINGS} onSelectStage={() => {}} />
     </div>
   ),
 };
