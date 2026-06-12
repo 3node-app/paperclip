@@ -171,7 +171,7 @@ export type PipelineViewMode = "nested" | "flat";
 export interface PipelineTableRow {
   pipeline: PipelineListItem;
   depth: number;
-  feedsIntoName: string | null;
+  parentPipelineName: string | null;
   hasChildren: boolean;
   expanded: boolean;
 }
@@ -287,7 +287,7 @@ export function buildPipelineTableRows(
     return pipelines.map((pipeline) => ({
       pipeline,
       depth: 0,
-      feedsIntoName: null,
+      parentPipelineName: null,
       hasChildren: false,
       expanded: true,
     }));
@@ -299,8 +299,8 @@ export function buildPipelineTableRows(
 
   for (const pipeline of pipelines) {
     const downstreamId = downstreamPipelineIds(pipeline.connections).find((id) => pipelinesById.has(id));
-    if (downstreamId && downstreamId !== pipeline.id) {
-      parentByChild.set(pipeline.id, downstreamId);
+    if (downstreamId && downstreamId !== pipeline.id && !parentByChild.has(downstreamId)) {
+      parentByChild.set(downstreamId, pipeline.id);
     }
   }
 
@@ -337,7 +337,7 @@ export function buildPipelineTableRows(
     rows.push({
       pipeline,
       depth,
-      feedsIntoName: parentId ? pipelinesById.get(parentId)?.name ?? null : null,
+      parentPipelineName: parentId ? pipelinesById.get(parentId)?.name ?? null : null,
       hasChildren: children.length > 0,
       expanded: !collapsed.has(pipeline.id),
     });
@@ -573,8 +573,8 @@ export function PipelinesIndexTable({
                           >
                             {row.pipeline.name}
                           </Link>
-                          {row.feedsIntoName ? (
-                            <span className="ml-2 text-muted-foreground">feeds into {row.feedsIntoName}</span>
+                          {row.parentPipelineName ? (
+                            <span className="ml-2 text-muted-foreground">under {row.parentPipelineName}</span>
                           ) : row.pipeline.description ? (
                             <span className="ml-2 text-muted-foreground">- {row.pipeline.description}</span>
                           ) : null}
@@ -749,7 +749,7 @@ function PipelinesIndex() {
           <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Work</p>
           <h1 className="text-2xl font-semibold text-foreground">Pipelines</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {formatNumber(pipelines.length)} pipeline{pipelines.length === 1 ? "" : "s"}. Connected ones are grouped under the work they feed.
+            {formatNumber(pipelines.length)} pipeline{pipelines.length === 1 ? "" : "s"}. Connected ones are grouped from upstream work into downstream work.
           </p>
         </div>
         <Button onClick={() => setNewPipelineOpen(true)}>

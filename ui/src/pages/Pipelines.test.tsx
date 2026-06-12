@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
-import { act, useState } from "react";
+import { useState } from "react";
 import type { AnchorHTMLAttributes, ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -115,6 +116,16 @@ vi.mock("../api/issues", () => ({
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 (globalThis as any).IS_REACT_ACT_ENVIRONMENT = true;
+
+function act(callback: () => void | Promise<void>): void | Promise<void> {
+  let result: unknown;
+  flushSync(() => {
+    result = callback();
+  });
+  return result && typeof (result as Promise<void>).then === "function"
+    ? (result as Promise<void>).then(() => undefined)
+    : undefined;
+}
 
 const fields: PipelineIntakeField[] = [
   { key: "title", label: "Name", type: "text", required: true },
@@ -426,14 +437,14 @@ function connectedPipelines(): PipelineListItem[] {
       name: "Release",
       description: "the launch this work is building toward",
       openCaseCount: 1,
-      connections: { upstreamPipelineIds: [], downstreamPipelineIds: [] },
+      connections: { upstreamPipelineIds: [], downstreamPipelineIds: ["features"] },
     }),
     makeListPipeline({
       id: "features",
       name: "Features",
       attentionCount: 1,
       openCaseCount: 4,
-      connections: { upstreamPipelineIds: [], downstreamPipelineIds: ["release"] },
+      connections: { upstreamPipelineIds: ["release"], downstreamPipelineIds: ["content"] },
     }),
     makeListPipeline({
       id: "content",
@@ -441,7 +452,7 @@ function connectedPipelines(): PipelineListItem[] {
       attentionCount: 2,
       inMotionCount: 3,
       openCaseCount: 7,
-      connections: { upstreamPipelineIds: [], downstreamPipelineIds: ["features"] },
+      connections: { upstreamPipelineIds: ["features"], downstreamPipelineIds: [] },
     }),
   ];
 }
@@ -488,7 +499,7 @@ describe("PipelinesIndexTable", () => {
     vi.clearAllMocks();
   });
 
-  it("nests connected pipelines under the work they feed", () => {
+  it("nests connected pipelines under their upstream work", () => {
     const { container, root } = renderIndexTable({
       pipelines: connectedPipelines(),
       connectionsAvailable: true,
@@ -497,8 +508,8 @@ describe("PipelinesIndexTable", () => {
     const content = container.textContent ?? "";
     expect(content.indexOf("Release")).toBeLessThan(content.indexOf("Features"));
     expect(content.indexOf("Features")).toBeLessThan(content.indexOf("Content production"));
-    expect(content).toContain("feeds into Release");
-    expect(content).toContain("feeds into Features");
+    expect(content).toContain("under Release");
+    expect(content).toContain("under Features");
 
     const collapse = container.querySelector<HTMLButtonElement>('button[aria-label="Collapse Release"]');
     expect(collapse).not.toBeNull();
@@ -514,19 +525,17 @@ describe("PipelinesIndexTable", () => {
       connectionsAvailable: true,
     });
 
-    expect(container.textContent).toContain("feeds into Release");
+    expect(container.textContent).toContain("under Release");
 
-    const flatButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Flat list"),
-    );
+    const flatButton = container.querySelector<HTMLButtonElement>('button[title="Flat list"]');
     expect(flatButton).toBeTruthy();
 
     act(() => {
       flatButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
 
-    expect(container.textContent).not.toContain("feeds into Release");
-    expect(container.textContent).not.toContain("feeds into Features");
+    expect(container.textContent).not.toContain("under Release");
+    expect(container.textContent).not.toContain("under Features");
 
     act(() => {
       root.unmount();
@@ -548,9 +557,7 @@ describe("PipelinesIndexTable", () => {
       connectionsAvailable: false,
     });
 
-    const nestedButton = Array.from(container.querySelectorAll("button")).find((button) =>
-      button.textContent?.includes("Nested"),
-    ) as HTMLButtonElement | undefined;
+    const nestedButton = container.querySelector<HTMLButtonElement>('button[title="Nested view"]');
     expect(nestedButton?.disabled).toBe(true);
     expect(container.textContent).toContain("Support knowledge base");
     expect(container.textContent).toContain("Sales decks");
