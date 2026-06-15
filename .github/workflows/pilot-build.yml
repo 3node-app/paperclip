@@ -1,0 +1,69 @@
+name: Pilot — Build & push (fork)
+
+# Workflow específico do fork ryan-pontes/paperclip.
+# Não modifica .github/workflows/docker.yml do upstream (evita conflito em merges).
+# Triggers:
+#   - Push em master ou qualquer branch feat/* → build + push
+#   - Manual dispatch
+on:
+  push:
+    branches:
+      - master
+      - "feat/**"
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".gitignore"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    name: Build linux/arm64 + push GHCR
+    runs-on: ubuntu-24.04-arm   # ARM nativo, ~5x mais rápido que QEMU
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == "refs/heads/master" }}
+            type=sha,prefix=${{ github.ref_name }}-
+            type=ref,event=branch
+
+      - name: Build & push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/arm64
+          target: production
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            USER_UID=1001
+            USER_GID=1001
+
+      - name: Image digest
+        run: echo "::notice title=Image published::ghcr.io/${{ github.repository }}@${{ steps.meta.outputs.digest }}"
