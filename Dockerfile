@@ -89,6 +89,25 @@ RUN printf '#!/bin/sh\nexec node /app/scripts/pilot-screenshot.mjs "$@"\n' \
     > /usr/local/bin/pilot-screenshot \
   && chmod +x /usr/local/bin/pilot-screenshot
 
+# Bake the Chromium revision that @playwright/mcp uses (923a6aca / retoma PR #13).
+# Agents reach the browser via the Microsoft @playwright/mcp server, spawned with
+# `npx @playwright/mcp@<ver>`. That package ships its OWN playwright-core, pinned to
+# a DIFFERENT revision than the project's @playwright/test (1.58.2) baked above — so
+# the NODE-153 bake does not cover it and agents otherwise re-download Chromium to
+# ~/.cache/ms-playwright on first MCP call (~30s cold start + npm-registry dependency
+# at spawn). We pin the MCP version and install its EXACT playwright build, depositing
+# the matching revision into PLAYWRIGHT_BROWSERS_PATH=/ms-playwright (set above). Both
+# revisions coexist by revision number, so @playwright/test and @playwright/mcp are
+# each satisfied with zero cold-start download.
+# KEEP IN SYNC: the control-plane MCP config must spawn this same pinned version
+# (`@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}`, not @latest) or runtime drift returns.
+ARG PLAYWRIGHT_MCP_VERSION=0.0.76
+RUN PW_VERSION="$(npm view @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} dependencies.playwright)" \
+  && echo "Baking Chromium for @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} via playwright@${PW_VERSION}" \
+  && npx -y playwright@${PW_VERSION} install --with-deps chromium chromium-headless-shell \
+  && rm -rf /var/lib/apt/lists/* \
+  && chown -R node:node /ms-playwright
+
 COPY scripts/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
