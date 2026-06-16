@@ -568,7 +568,9 @@ describe("agent issue mutation checkout ownership", () => {
   it.each([
     ["patch", (app: express.Express) => request(app).patch(`/api/issues/${issueId}`).send({ title: "Blocked" })],
     ["delete", (app: express.Express) => request(app).delete(`/api/issues/${issueId}`)],
-    ["comment", (app: express.Express) => request(app).post(`/api/issues/${issueId}/comments`).send({ body: "blocked" })],
+    // NOTE: a pure `comment` is intentionally NOT in this list. Patch B (NODE-135) routes
+    // comment insertion through assertAgentIssueCommentAllowed (read access only), so a peer
+    // agent may comment on an actively-checked-out issue; see the "Patch B" describe block below.
     [
       "document upsert",
       (app: express.Express) =>
@@ -975,7 +977,8 @@ describe("agent issue mutation checkout ownership", () => {
 
   it.each([
     ["todo", "patch", (app: express.Express) => request(app).patch(`/api/issues/${issueId}`).send({ title: "Todo update" })],
-    ["todo", "comment", (app: express.Express) => request(app).post(`/api/issues/${issueId}/comments`).send({ body: "Todo noise" })],
+    // NOTE: ["todo", "comment"] removed — Patch B (NODE-135) allows a peer agent to post a pure
+    // comment on a peer's issue regardless of status. Field/status mutations stay write-locked.
     ["blocked", "patch", (app: express.Express) => request(app).patch(`/api/issues/${issueId}`).send({ title: "Blocked update" })],
   ])("rejects peer agent %s issue %s mutations outside active checkout ownership", async (status, _kind, sendRequest) => {
     mockIssueService.getById.mockResolvedValue(makeIssue({ status: status as "todo" | "blocked", assigneeAgentId: ownerAgentId }));
@@ -987,6 +990,116 @@ describe("agent issue mutation checkout ownership", () => {
     expect(mockIssueService.assertCheckoutOwner).not.toHaveBeenCalled();
     expect(mockIssueService.update).not.toHaveBeenCalled();
     expect(mockIssueService.addComment).not.toHaveBeenCalled();
+  });
+
+  // Patch B (NODE-135): split the communicative act (comment) from field/status mutation.
+  // A non-assignee agent may comment with only read access + company membership; any transition
+  // intent carried in the same request still goes through the full mutation gate (write-lock),
+  // and the multi-tenant boundary is preserved via decideIssueAccess("issue:read").
+  describe("Patch B (NODE-135): agent comment unlock on in_review", () => {
+    it("(a) lets a non-assignee agent comment on an in_review issue without 403", async () => {
+      mockIssueService.getById.mockResolvedValue(
+        makeIssue({ status: "in_review", assigneeAgentId: ownerAgentId }),
+      );
+
+      const res = await request(await createApp(peerActor()))
+        .post(`/api/issues/${issueId}/comments`)
+        .send({ body: "Felipe aqui — posso aprovar isso, @board?" });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(mockIssueService.addComment).toHaveBeenCalled();
+      // Pure comment: no field/status mutation occurred.
+      expect(mockIssueService.update).not.toHaveBeenCalled();
+    });
+
+    it("(a') lets a non-assignee agent comment on an actively-checked-out in_progress issue", async () => {
+      // The old assertAgentIssueMutationAllowed returned 409 here; a pure comment is communicative,
+      // not a mutation, so Patch B allows it.
+      mockIssueService.getById.mockResolvedValue(
+        makeIssue({ status: "in_progress", assigneeAgentId: ownerAgentId }),
+      );
+
+      const res = await request(await createApp(peerActor()))
+        .post(`/api/issues/${issueId}/comments`)
+        .send({ body: "Deixando uma nota enquanto você trabalha nisso." });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      expect(mockIssueService.addComment).toHaveBeenCalled();
+      expect(mockIssueService.update).not.toHaveBeenCalled();
+      // The comment path must not consult checkout ownership.
+      expect(mockIssueService.assertCheckoutOwner).not.toHaveBeenCalled();
+    });
+
+    it("(b) still 403s a non-assignee field/status change carried with the comment (write-lock intact)", async () => {
+      mockIssueService.getById.mockResolvedValue(
+        makeIssue({ status: "in_review", assigneeAgentId: ownerAgentId }),
+      );
+
+      const res = await request(await createApp(peerActor()))
+        .post(`/api/issues/${issueId}/comments`)
+        .send({ body: "Reabrindo", reopen: true });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(res.body.error).toBe("Agent cannot mutate another agent's issue");
+      // The whole request is rejected before either the comment or the status change lands.
+      expect(mockIssueService.addComment).not.toHaveBeenCalled();
+      expect(mockIssueService.update).not.toHaveBeenCalled();
+    });
+
+    it("(b') still 403s a structured approval comment from a non-participant (approvals out of scope)", async () => {
+      // in_review + pending execution state + an approval-shaped body carries transition intent,
+      // so it must keep going through the mutation gate even though it is 'just a comment'.
+      mockIssueService.getById.mockResolvedValue(
+        makeIssue({
+          status: "in_review",
+          assigneeAgentId: ownerAgentId,
+          // Must be a schema-valid IssueExecutionState: parseIssueExecutionState() runs the
+          // full zod validator, so a partial object would parse to null and the intent gate
+          // would (wrongly) treat this as a pure comment. Mirror the real DB-persisted shape.
+          executionState: {
+            status: "pending",
+            currentStageId: null,
+            currentStageIndex: null,
+            currentStageType: null,
+            currentParticipant: { type: "agent", agentId: ownerAgentId },
+            returnAssignee: null,
+            completedStageIds: [],
+            lastDecisionId: null,
+            lastDecisionOutcome: null,
+          },
+        }),
+      );
+
+      const res = await request(await createApp(peerActor()))
+        .post(`/api/issues/${issueId}/comments`)
+        .send({ body: "## Review: APPROVED\n\nLooks good." });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(res.body.error).toBe("Agent cannot mutate another agent's issue");
+      expect(mockIssueService.addComment).not.toHaveBeenCalled();
+      expect(mockIssueService.update).not.toHaveBeenCalled();
+    });
+
+    it("(c) rejects a cross-tenant agent comment, preserving multi-tenant isolation (403)", async () => {
+      mockIssueService.getById.mockResolvedValue(
+        makeIssue({ status: "in_review", assigneeAgentId: ownerAgentId }),
+      );
+      // Deny the read decision the way the boundary would for an out-of-tenant issue.
+      mockAccessService.decide.mockImplementation(async (input: { action: string }) => ({
+        allowed: false,
+        action: input.action,
+        reason: "deny_missing_grant",
+        explanation: "Issue belongs to another company.",
+      }));
+
+      const res = await request(await createApp(peerActor()))
+        .post(`/api/issues/${issueId}/comments`)
+        .send({ body: "comentário de outra company" });
+
+      expect(res.status, JSON.stringify(res.body)).toBe(403);
+      expect(res.body.error).toBe("Issue is outside this actor's authorization boundary");
+      expect(mockIssueService.addComment).not.toHaveBeenCalled();
+    });
   });
 
   it("allows same-company agent mutations on unassigned in-progress issues", async () => {

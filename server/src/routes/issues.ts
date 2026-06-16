@@ -1928,6 +1928,42 @@ export function issueRoutes(
     return true;
   }
 
+  // Patch B (NODE-135): gate for the *communicative* act of inserting a comment, distinct from
+  // assertAgentIssueMutationAllowed. Posting a comment is not a field/status mutation, so this
+  // intentionally does NOT enforce assignee exclusivity: any agent that can READ the issue (same
+  // company + within its authorization boundary) may comment, even when the issue is in_review or
+  // checked out by another agent. The multi-tenant boundary is preserved via decideIssueAccess
+  // ("issue:read"); company membership is already asserted by assertCompanyAccess at the call site.
+  // SECURITY: this MUST only be reached for pure comments — any payload carrying transition intent
+  // (reopen / resume / interrupt / structured approval auto-complete) keeps going through
+  // assertAgentIssueMutationAllowed so the write-lock on fields/status stays intact.
+  async function assertAgentIssueCommentAllowed(
+    req: Request,
+    res: Response,
+    issue: {
+      id: string;
+      companyId: string;
+      projectId: string | null;
+      parentId: string | null;
+      status: string;
+      assigneeAgentId: string | null;
+      assigneeUserId: string | null;
+    },
+  ) {
+    if (req.actor.type !== "agent") return true;
+    const actorAgentId = req.actor.agentId;
+    if (!actorAgentId) {
+      res.status(403).json({ error: "Agent authentication required" });
+      return false;
+    }
+    const boundaryDecision = await decideIssueAccess(req, issue, "issue:read");
+    if (!boundaryDecision.allowed) {
+      res.status(403).json({ error: "Issue is outside this actor's authorization boundary" });
+      return false;
+    }
+    return true;
+  }
+
   function isStatusOnlyCheapRecoveryContext(contextSnapshot: unknown) {
     if (!contextSnapshot || typeof contextSnapshot !== "object" || Array.isArray(contextSnapshot)) return false;
     const context = contextSnapshot as Record<string, unknown>;
@@ -6658,7 +6694,30 @@ export function issueRoutes(
       return;
     }
     assertCompanyAccess(req, issue.companyId);
-    if (!(await assertAgentIssueMutationAllowed(req, res, issue))) return;
+    // Patch B (NODE-135): split the comment-insertion authorization from the field/status-mutation
+    // authorization. A pure communicative comment only needs read access + company membership, so a
+    // non-assignee agent can comment on an in_review (or otherwise checked-out) issue. Any payload
+    // that carries transition intent still goes through the full mutation gate so the assignee
+    // write-lock is preserved. The intent signals, mirrored from the branches below:
+    //   - reopen / resume  -> moves the issue back to todo (see effectiveMoveToTodoRequested branch)
+    //   - interrupt        -> cancels the active run (board-only branch)
+    //   - structured approval on a pending in_review issue -> auto-completes to done
+    //     (shouldAutoApproveReviewComment branch). This is an approval-between-agents path, which is
+    //     explicitly OUT OF SCOPE for this patch, so it must keep the mutation gate.
+    // SECURITY: keep this conservative — when in doubt, route through the mutation gate.
+    const commentCarriesMutationIntent =
+      req.body.reopen === true ||
+      req.body.resume === true ||
+      req.body.interrupt === true ||
+      isClosedIssueStatus(issue.status) ||
+      (issue.status === "in_review" &&
+        parseIssueExecutionState(issue.executionState)?.status === "pending" &&
+        isApprovalReviewComment(req.body.body));
+    if (commentCarriesMutationIntent) {
+      if (!(await assertAgentIssueMutationAllowed(req, res, issue))) return;
+    } else if (!(await assertAgentIssueCommentAllowed(req, res, issue))) {
+      return;
+    }
     if (!assertStructuredCommentFieldsAllowed(req, res, {
       presentation: req.body.presentation,
       metadata: req.body.metadata,
