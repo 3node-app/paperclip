@@ -1,3 +1,6 @@
+# Dependabot config — npm + docker + github-actions.
+# Security updates (Dependabot alerts + automated security fixes) are enabled at repo level.
+# Version updates are grouped weekly to limit noise (NODE-157).
 version: 2
 updates:
   - package-ecosystem: npm
@@ -9,10 +12,26 @@ updates:
     open-pull-requests-limit: 10
     labels:
       - "dependencies"
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
     ignore:
       # Ignore major version bumps — review those manually
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "docker"
 
   - package-ecosystem: github-actions
     directory: "/"
