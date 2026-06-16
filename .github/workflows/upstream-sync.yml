@@ -1,0 +1,70 @@
+name: Weekly Upstream Sync
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Monday 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/paperclipai/paperclip.git
+          git fetch upstream master
+
+      - name: Check for new upstream commits
+        id: check
+        run: |
+          COUNT=$(git log master..upstream/master --oneline | wc -l | tr -d ' ')
+          COMMITS=$(git log master..upstream/master --oneline)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "commits<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$COMMITS" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "Upstream has $COUNT new commit(s)"
+
+      - name: Create sync branch and merge
+        if: steps.check.outputs.count != '0'
+        run: |
+          BRANCH="upstream-sync/$(date +%Y-W%V)"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git merge upstream/master --no-edit
+          git push origin "$BRANCH" --force
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+        id: merge
+
+      - name: Open PR
+        if: steps.check.outputs.count != '0'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: ${{ steps.merge.outputs.branch }}
+          base: master
+          title: 'chore(sync): ${{ steps.check.outputs.count }} commit(s) from upstream'
+          body: |
+            Automated weekly upstream sync from [paperclipai/paperclip](https://github.com/paperclipai/paperclip).
+
+            **New commits:**
+            ```
+            ${{ steps.check.outputs.commits }}
+            ```
+
+            Review for conflicts, breaking changes, or security-sensitive diffs before merging.
+          labels: upstream-sync
+          assignees: ryan-pontes
