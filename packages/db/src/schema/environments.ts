@@ -21,6 +21,12 @@ export const environments = pgTable(
     companyDriverIdx: uniqueIndex("environments_company_driver_idx")
       .on(table.companyId, table.driver)
       .where(sql`${table.driver} = 'local'`),
+    // One managed Kubernetes sandbox environment per company. Marker lives in
+    // metadata (driver "sandbox" is shared with tenant-created sandboxes), so the
+    // predicate is on the marker, not just the driver.
+    companyManagedK8sIdx: uniqueIndex("environments_company_managed_k8s_idx")
+      .on(table.companyId)
+      .where(sql`${table.driver} = 'sandbox' AND ${table.metadata} ->> 'managedKubernetesSandbox' = 'true'`),
     companyNameIdx: index("environments_company_name_idx").on(table.companyId, table.name),
   }),
 );
