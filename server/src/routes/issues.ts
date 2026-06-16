@@ -89,6 +89,11 @@ import {
   routineService,
   workProductService,
 } from "../services/index.js";
+import {
+  hasPendingApprovalWake,
+  maybeWakeCeoForApprovalPending,
+  resolveActiveCeoAgentId,
+} from "../services/approval-wakeup.js";
 import { logger } from "../middleware/logger.js";
 import { conflict, forbidden, HttpError, notFound, unauthorized, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
@@ -6094,6 +6099,31 @@ export function issueRoutes(
       agentId: actor.agentId,
       userId: actor.actorType === "user" ? actor.actorId : null,
     });
+
+    // NODE-134 — when an agent opens a board approval gate, auto-wake the
+    // active CEO so a pending approval does not stall. Fire-and-forget: this
+    // must never derail interaction creation.
+    void maybeWakeCeoForApprovalPending(
+      {
+        issue: { id: issue.id, companyId: issue.companyId },
+        interaction: {
+          id: interaction.id,
+          kind: interaction.kind,
+          status: interaction.status,
+          createdByAgentId: interaction.createdByAgentId ?? null,
+        },
+      },
+      {
+        resolveCeo: (companyId) => resolveActiveCeoAgentId(db, companyId),
+        hasPendingWake: (wakeArgs) => hasPendingApprovalWake(db, wakeArgs),
+        wakeup: (agentId, opts) =>
+          heartbeat.wakeup(agentId, opts as Parameters<typeof heartbeat.wakeup>[1]),
+        logger,
+      },
+    ).catch((err) => logger.warn(
+      { err, issueId: issue.id, interactionId: interaction.id },
+      "approval-wakeup: failed to auto-wake CEO for approval-pending interaction",
+    ));
 
     await logActivity(db, {
       companyId: issue.companyId,
