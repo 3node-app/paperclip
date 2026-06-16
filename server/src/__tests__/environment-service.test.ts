@@ -282,21 +282,26 @@ describeEmbeddedPostgres("environmentService leases", () => {
       updatedAt: new Date(),
     });
 
-    // No partial unique index covers sandbox drivers yet, so dedup is
-    // post-insert convergence (prefer the oldest row, delete the loser).
+    // The partial unique index `environments_company_managed_k8s_idx` enforces a
+    // single managed k8s sandbox per company, so concurrent creates collapse to
+    // one row at the DB level (the losers' inserts no-op and re-read the winner).
     const results = await Promise.all(
       Array.from({ length: 8 }, () =>
         svc.ensureKubernetesEnvironment(companyId, { inCluster: true, backend: "job" }),
       ),
     );
 
-    expect(new Set(results.map((environment) => environment.id)).size).toBe(1);
+    // Every caller must observe the same surviving environment id.
+    const ids = new Set(results.map((environment) => environment.id));
+    expect(ids.size).toBe(1);
 
     const rows = await db
       .select()
       .from(environments)
       .where(and(eq(environments.companyId, companyId), eq(environments.driver, "sandbox")));
     expect(rows).toHaveLength(1);
+    // The single surviving row is the one every caller returned.
+    expect(rows[0]?.id).toBe([...ids][0]);
     expect((rows[0]?.metadata as Record<string, unknown>)?.managedKubernetesSandbox).toBe(true);
   });
 
