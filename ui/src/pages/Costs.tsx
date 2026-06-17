@@ -9,7 +9,7 @@ import type {
   FinanceEvent,
   QuotaWindow,
 } from "@paperclipai/shared";
-import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronRight, Coins, DollarSign, ReceiptText } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, ChevronDown, ChevronRight, Coins, DollarSign, HelpCircle, ReceiptText } from "lucide-react";
 import { budgetsApi } from "../api/budgets";
 import { costsApi } from "../api/costs";
 import { BillerSpendCard } from "../components/BillerSpendCard";
@@ -32,8 +32,33 @@ import { billingTypeDisplayName, cn, formatCents, formatTokens, providerDisplayN
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 const NO_COMPANY = "__none__";
+
+// Inference USD is an estimate of the equivalent metered-API price, not an
+// actual bill — subscription-billed runs (e.g. Claude Max) cost a flat fee, so
+// we price their token counts at list rates for cross-agent comparison. Rows
+// labeled "Metered API" carry their real billed cost; "Subscription" rows are
+// the estimate. Source of truth: docs/RUNBOOK-PRICING.md.
+const ESTIMATE_TOOLTIP =
+  "USD is an estimate of the equivalent metered-API price, not an actual bill. " +
+  "Subscription-billed runs (e.g. Claude Max) cost a flat fee; we price their token counts at " +
+  "list rates so spend is comparable across agents. Rows labeled “Metered API” reflect real " +
+  "billed cost; “Subscription” rows are estimated.";
+
+function EstimateInfo({ side = "top" }: { side?: "top" | "right" | "bottom" | "left" }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <HelpCircle className="h-3 w-3 text-muted-foreground cursor-help" aria-label="How inference USD is calculated" />
+      </TooltipTrigger>
+      <TooltipContent side={side} sideOffset={4} className="max-w-xs">
+        {ESTIMATE_TOOLTIP}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 function currentWeekRange(): { from: string; to: string } {
   const now = new Date();
@@ -634,7 +659,7 @@ export function Costs() {
           ) : overviewError ? (
             <p className="text-sm text-destructive">{(overviewError as Error).message}</p>
           ) : (
-            <>
+            <TooltipProvider>
               {activeBudgetIncidents.length > 0 ? (
                 <div className="grid gap-4 xl:grid-cols-2">
                   {activeBudgetIncidents.slice(0, 2).map((incident) => (
@@ -657,9 +682,12 @@ export function Costs() {
               <div className="grid gap-4 xl:grid-cols-[1.3fr,1fr]">
                 <Card>
                   <CardHeader className="px-5 pt-5 pb-2">
-                    <CardTitle className="text-base">Inference ledger</CardTitle>
+                    <CardTitle className="flex items-center gap-1.5 text-base">
+                      Inference ledger
+                      <EstimateInfo />
+                    </CardTitle>
                     <CardDescription>
-                      Request-scoped inference spend for the selected period.
+                      Request-scoped inference spend for the selected period (estimated, not billed).
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4 px-5 pb-5 pt-2">
@@ -716,7 +744,10 @@ export function Costs() {
               <div className="grid gap-4 xl:grid-cols-[1.25fr,0.95fr]">
                 <Card>
                   <CardHeader className="px-5 pt-5 pb-2">
-                    <CardTitle className="text-base">By agent</CardTitle>
+                    <CardTitle className="flex items-center gap-1.5 text-base">
+                      By agent
+                      <EstimateInfo />
+                    </CardTitle>
                     <CardDescription>What each agent consumed in the selected period.</CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-2 px-5 pb-5 pt-2">
@@ -827,7 +858,7 @@ export function Costs() {
                   <FinanceTimelineCard rows={topFinanceEvents.slice(0, 6)} emptyMessage="No finance events yet. Add account-level charges once biller invoices or credits land." />
                 </div>
               </div>
-            </>
+            </TooltipProvider>
           )}
         </TabsContent>
 
