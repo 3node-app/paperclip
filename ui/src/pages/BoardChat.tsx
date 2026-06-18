@@ -718,6 +718,31 @@ export function BoardChat() {
                     size="icon-sm"
                     className="text-muted-foreground"
                     aria-label="new chat"
+                    disabled={sending || !boardIssueId}
+                    onClick={async () => {
+                      if (!boardIssueId || sending || !selectedCompanyId) return;
+                      // Close the current Board Operations issue so the
+                      // server picks a fresh one (or creates it) on the
+                      // next message. Best-effort: if the PATCH fails the
+                      // server will still reuse the existing issue, which
+                      // is a no-op rather than a broken state.
+                      try {
+                        await issuesApi.update(boardIssueId, { status: "done" });
+                      } catch {
+                        /* fall through */
+                      }
+                      queryClient.removeQueries({
+                        queryKey: queryKeys.issues.comments(boardIssueId),
+                      });
+                      setBoardIssueId(null);
+                      setStreamingText("");
+                      setStatusText("");
+                      setErrorText("");
+                      queryClient.invalidateQueries({
+                        queryKey: queryKeys.issues.list(selectedCompanyId),
+                      });
+                      composerRef.current?.focus();
+                    }}
                   >
                     <MessageSquarePlus className="h-4 w-4" />
                   </Button>
