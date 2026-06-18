@@ -24,6 +24,8 @@ export {
   ClaudeMultiAccountStore,
   createDefaultStore as createDefaultMultiAccountStore,
   isSessionLimitError,
+  probeAccountUsagePercent,
+  evaluateAutoPause,
   type AccountSummary,
   type AccountMeta,
   type ActiveState,

@@ -15,6 +15,11 @@
 
 import { promises as fs } from "node:fs";
 import path from "node:path";
+import {
+  captureClaudeCliUsageTextForConfigDir,
+  parseClaudeCliUsageText,
+  toPercent,
+} from "./quota.js";
 
 const STORE_DIRNAME = "credentials-store";
 const ACTIVE_FILE = "active.json";
@@ -265,4 +270,83 @@ export function isSessionLimitError(output: string): boolean {
 export function createDefaultStore(home?: string): ClaudeMultiAccountStore {
   const resolved = home ?? process.env.HOME ?? "/paperclip";
   return new ClaudeMultiAccountStore(resolved);
+}
+
+/**
+ * Probe Anthropic for the given account's current usage and persist the
+ * highest-percent window into its meta.json. Returns the percent (0-100) or
+ * null when the probe could not be parsed.
+ */
+export async function probeAccountUsagePercent(
+  store: ClaudeMultiAccountStore,
+  accountId: string,
+  timeoutMs = 12_000,
+): Promise<number | null> {
+  const dir = store.accountDir(accountId);
+  let usageText: string;
+  try {
+    usageText = await captureClaudeCliUsageTextForConfigDir(dir, timeoutMs);
+  } catch {
+    await store.updateStatusCheck(accountId, null);
+    return null;
+  }
+  const windows = parseClaudeCliUsageText(usageText);
+  if (windows.length === 0) {
+    await store.updateStatusCheck(accountId, null);
+    return null;
+  }
+  // Use the worst-case window — usually weekly-all-models for Max plans.
+  let worst = 0;
+  for (const window of windows) {
+    const pct = toPercent(window.used, window.limit);
+    if (pct !== null && pct > worst) worst = pct;
+  }
+  const value = worst > 0 ? worst : null;
+  await store.updateStatusCheck(accountId, value);
+  return value;
+}
+
+/**
+ * Decide whether the squad should be auto-paused based on the current state
+ * of the credentials store. Returns a reason string when pause is warranted,
+ * or null otherwise.
+ *
+ * Policy: only pause when EVERY non-exhausted account has exceeded the
+ * threshold (i.e. there is no remaining headroom anywhere). Single exhausted
+ * accounts do not pause the squad — rotation handles them.
+ */
+export async function evaluateAutoPause(
+  store: ClaudeMultiAccountStore,
+  thresholdPercent: number,
+): Promise<{ shouldPause: boolean; reason: string | null }> {
+  if (
+    !Number.isFinite(thresholdPercent) ||
+    thresholdPercent <= 0 ||
+    thresholdPercent > 100
+  ) {
+    return { shouldPause: false, reason: null };
+  }
+  const accounts = await store.list();
+  const eligible = accounts.filter(
+    (account) => account.hasCredentials && !account.isExhausted,
+  );
+  if (eligible.length === 0) {
+    // No usable accounts at all → rotation already exhausted everything.
+    return {
+      shouldPause: true,
+      reason: `auto-pause: no eligible Claude accounts available (${accounts.length} total)`,
+    };
+  }
+  const stillBelow = eligible.filter(
+    (account) =>
+      account.percentUsed === null ||
+      account.percentUsed < thresholdPercent,
+  );
+  if (stillBelow.length > 0) {
+    return { shouldPause: false, reason: null };
+  }
+  return {
+    shouldPause: true,
+    reason: `auto-pause: all ${eligible.length} eligible Claude account(s) at or above ${thresholdPercent}% usage`,
+  };
 }
