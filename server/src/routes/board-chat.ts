@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Db } from "@paperclipai/db";
 import type { DeploymentMode } from "@paperclipai/shared";
-import { instanceSettingsService, issueService } from "../services/index.js";
+import { boardAuthService, instanceSettingsService, issueService } from "../services/index.js";
 import { assertCompanyAccess, getActorInfo } from "./authz.js";
 
 /**
@@ -257,6 +257,22 @@ export function boardChatRoutes(
       liveBoardChats -= 1;
     };
 
+    // In `authenticated` deployments the spawned `claude` reaches the local
+    // API on 127.0.0.1, but the actor middleware still requires a Bearer
+    // token there. Mint a short-lived board API key scoped to the requester
+    // and pass it as PAPERCLIP_API_KEY; revoke it after the subprocess
+    // exits so it doesn't linger as a credential lying around.
+    const authSvc = boardAuthService(db);
+    let mintedApiKey: { id: string; token: string } | null = null;
+    if (req.actor.type === "board" && req.actor.userId) {
+      const minted = await authSvc.createNamedBoardApiKey({
+        userId: req.actor.userId,
+        name: `board-chat-${Date.now()}`,
+        expiresAt: new Date(Date.now() + 10 * 60 * 1000),
+      });
+      mintedApiKey = { id: minted.id, token: minted.token };
+    }
+
     const proc = spawn("claude", args, {
       stdio: ["pipe", "pipe", "pipe"],
       cwd: "/tmp",
@@ -264,8 +280,16 @@ export function boardChatRoutes(
         ...process.env,
         PAPERCLIP_API_URL: apiUrl,
         PAPERCLIP_COMPANY_ID: companyId,
+        ...(mintedApiKey ? { PAPERCLIP_API_KEY: mintedApiKey.token } : {}),
       },
     });
+
+    if (mintedApiKey) {
+      const apiKeyId = mintedApiKey.id;
+      proc.once("close", () => {
+        void authSvc.revokeBoardApiKey(apiKeyId).catch(() => undefined);
+      });
+    }
 
     let fullResponse = "";
     let streamedViaDelta = false;

@@ -187,9 +187,10 @@ export class ClaudeMultiAccountStore {
     if (candidates.length === 0) return null;
     const active = await this.readActive();
     // Prefer the currently active one if still eligible.
-    const currentStill =
-      active.current && candidates.find((c) => c.id === active.current);
-    const picked = currentStill ?? candidates[0];
+    const currentStill: AccountSummary | undefined = active.current
+      ? candidates.find((c) => c.id === active.current)
+      : undefined;
+    const picked: AccountSummary = currentStill ?? candidates[0];
     if (active.current !== picked.id) {
       const newOrder = Array.from(
         new Set([picked.id, ...active.order, ...all.map((a) => a.id)]),
@@ -298,7 +299,7 @@ export async function probeAccountUsagePercent(
   // Use the worst-case window — usually weekly-all-models for Max plans.
   let worst = 0;
   for (const window of windows) {
-    const pct = toPercent(window.used, window.limit);
+    const pct = toPercent(window.usedPercent);
     if (pct !== null && pct > worst) worst = pct;
   }
   const value = worst > 0 ? worst : null;
