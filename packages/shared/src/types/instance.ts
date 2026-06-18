@@ -1,6 +1,6 @@
 import type { FeedbackDataSharingPreference } from "./feedback.js";
 
-export const DAILY_RETENTION_PRESETS = [3, 7, 14] as const;
+export const DAILY_RETENTION_PRESETS = [2, 3, 7, 14] as const;
 export const WEEKLY_RETENTION_PRESETS = [1, 2, 4] as const;
 export const MONTHLY_RETENTION_PRESETS = [1, 3, 6] as const;
 export const DEFAULT_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS = 24;
@@ -14,7 +14,7 @@ export interface BackupRetentionPolicy {
 }
 
 export const DEFAULT_BACKUP_RETENTION: BackupRetentionPolicy = {
-  dailyDays: 7,
+  dailyDays: 2,
   weeklyWeeks: 4,
   monthlyMonths: 1,
 };
