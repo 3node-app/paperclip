@@ -90,25 +90,16 @@ RUN printf '#!/bin/sh\nexec node /app/scripts/pilot-screenshot.mjs "$@"\n' \
     > /usr/local/bin/pilot-screenshot \
   && chmod +x /usr/local/bin/pilot-screenshot
 
-# Bake the Chromium revision that @playwright/mcp uses (923a6aca / retoma PR #13).
-# Agents reach the browser via the Microsoft @playwright/mcp server, spawned with
-# `npx @playwright/mcp@<ver>`. That package ships its OWN playwright-core, pinned to
-# a DIFFERENT revision than the project's @playwright/test (1.58.2) baked above — so
-# the NODE-153 bake does not cover it and agents otherwise re-download Chromium to
-# ~/.cache/ms-playwright on first MCP call (~30s cold start + npm-registry dependency
-# at spawn). We pin the MCP version and install its EXACT playwright build, depositing
-# the matching revision into PLAYWRIGHT_BROWSERS_PATH=/ms-playwright (set above). Both
-# revisions coexist by revision number, so @playwright/test and @playwright/mcp are
-# each satisfied with zero cold-start download.
-# KEEP IN SYNC: the control-plane MCP config must spawn this same pinned version
-# (`@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}`, not @latest) or runtime drift returns.
-ARG PLAYWRIGHT_MCP_VERSION=0.0.76
-RUN PW_VERSION="$(npm view @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} dependencies.playwright)" \
-  && echo "Baking Chromium for @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} via playwright@${PW_VERSION}" \
-  && apt-get update \
-  && npx -y playwright@${PW_VERSION} install --with-deps chromium chromium-headless-shell \
-  && rm -rf /var/lib/apt/lists/* \
-  && chown -R node:node /ms-playwright
+# Note: the @playwright/mcp Chromium bake (originally added alongside NODE-195)
+# is intentionally skipped here. On the self-hosted ARM64 builder it caused the
+# build to deadlock after Chromium download (no log output for 3 hours, every
+# tagged build cancelled by timeout). The @playwright/test bake above already
+# stages a Chromium revision in PLAYWRIGHT_BROWSERS_PATH; the MCP spawn falls
+# back to a lazy `npx -y @playwright/mcp@<ver>` download on first use
+# (~30s cold start, then cached in the persistent volume). This is the same
+# behaviour pre-NODE-195 — slower first call, but reliable cold builds.
+# To re-introduce baking, run it in a separate stage with PROGRESS=plain
+# and avoid back-to-back `playwright install --with-deps` invocations.
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
