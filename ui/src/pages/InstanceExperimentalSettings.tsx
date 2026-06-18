@@ -217,6 +217,9 @@ export function InstanceExperimentalSettings() {
   const autoRestartDevServerWhenIdle = experimentalQuery.data?.autoRestartDevServerWhenIdle === true;
   const enableIssueGraphLivenessAutoRecovery =
     experimentalQuery.data?.enableIssueGraphLivenessAutoRecovery === true;
+  // Defaults to enabled — checked unless an operator has explicitly turned it off (NODE-256).
+  const enableProductivityReviewReconciliation =
+    experimentalQuery.data?.enableProductivityReviewReconciliation !== false;
   const lookbackHours =
     experimentalQuery.data?.issueGraphLivenessAutoRecoveryLookbackHours ?? 24;
   const parsedLookbackHours = Number.parseInt(lookbackHoursDraft, 10);
@@ -409,6 +412,29 @@ export function InstanceExperimentalSettings() {
             onCheckedChange={() => toggleMutation.mutate({ enableCloudSync: !enableCloudSync })}
             disabled={toggleMutation.isPending}
             aria-label="Toggle cloud sync experimental setting"
+          />
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-border bg-card p-5">
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1.5">
+            <h2 className="text-sm font-semibold">Productivity-Review Reconciliation</h2>
+            <p className="max-w-2xl text-sm text-muted-foreground">
+              Periodically scan active agent issues and open productivity-review work when an agent appears stuck.
+              Enabled by default. Turn it off to stop the recurring sweep and conserve LLM quota — existing review
+              issues are preserved.
+            </p>
+          </div>
+          <ToggleSwitch
+            checked={enableProductivityReviewReconciliation}
+            onCheckedChange={() =>
+              toggleMutation.mutate({
+                enableProductivityReviewReconciliation: !enableProductivityReviewReconciliation,
+              })
+            }
+            disabled={toggleMutation.isPending}
+            aria-label="Toggle productivity-review reconciliation experimental setting"
           />
         </div>
       </section>

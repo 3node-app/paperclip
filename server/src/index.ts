@@ -813,7 +813,13 @@ export async function startServer(): Promise<StartedServer> {
       }
 
       const reviewed = await heartbeat.reconcileProductivityReviews();
-      if (reviewed.created > 0 || reviewed.updated > 0 || reviewed.failed > 0) {
+      if (reviewed.disabled) {
+        // NODE-256: surfaced once at startup (the periodic sweep stays silent) so it is
+        // clear the reconciliation is intentionally off without spamming every tick.
+        logger.info(
+          "productivity-review reconciliation skipped (disabled via instance setting enableProductivityReviewReconciliation=false)",
+        );
+      } else if (reviewed.created > 0 || reviewed.updated > 0 || reviewed.failed > 0) {
         logger.warn({ ...reviewed }, "startup productivity reconciliation created or updated review work");
       }
     })().catch((err) => {

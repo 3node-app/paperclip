@@ -52,6 +52,9 @@ export function normalizeExperimentalSettings(raw: unknown): InstanceExperimenta
       enableCloudSync: parsed.data.enableCloudSync ?? false,
       autoRestartDevServerWhenIdle: parsed.data.autoRestartDevServerWhenIdle ?? false,
       enableIssueGraphLivenessAutoRecovery: parsed.data.enableIssueGraphLivenessAutoRecovery ?? false,
+      // Defaults to true (preserve historical behavior) — see NODE-256.
+      enableProductivityReviewReconciliation:
+        parsed.data.enableProductivityReviewReconciliation ?? true,
       issueGraphLivenessAutoRecoveryLookbackHours:
         parsed.data.issueGraphLivenessAutoRecoveryLookbackHours ??
         DEFAULT_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
@@ -67,6 +70,7 @@ export function normalizeExperimentalSettings(raw: unknown): InstanceExperimenta
     enableCloudSync: false,
     autoRestartDevServerWhenIdle: false,
     enableIssueGraphLivenessAutoRecovery: false,
+    enableProductivityReviewReconciliation: true,
     issueGraphLivenessAutoRecoveryLookbackHours:
       DEFAULT_ISSUE_GRAPH_LIVENESS_AUTO_RECOVERY_LOOKBACK_HOURS,
   };

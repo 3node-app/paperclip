@@ -23,6 +23,7 @@ describe("instance settings service", () => {
       enableCloudSync: true,
       autoRestartDevServerWhenIdle: true,
       enableIssueGraphLivenessAutoRecovery: true,
+      enableProductivityReviewReconciliation: true,
       issueGraphLivenessAutoRecoveryLookbackHours: 48,
     });
   });

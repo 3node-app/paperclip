@@ -23,6 +23,7 @@ import {
   PRODUCTIVITY_REVIEW_ORIGIN_KIND,
   productivityReviewService,
 } from "../services/productivity-review.ts";
+import { instanceSettingsService } from "../services/instance-settings.ts";
 
 const embeddedPostgresSupport = await getEmbeddedPostgresTestSupport();
 const describeEmbeddedPostgres = embeddedPostgresSupport.supported ? describe : describe.skip;
@@ -335,6 +336,55 @@ describeEmbeddedPostgres("productivity review service", () => {
     expect(result.created).toBe(1);
     expect(result.creationCapped).toBe(0);
     expect(await listProductivityReviews(seeded.companyId)).toHaveLength(4);
+  });
+
+  it("early-returns without scanning when reconciliation is disabled via instance settings (NODE-256)", async () => {
+    const now = new Date("2026-04-28T12:00:00.000Z");
+    const seeded = await seedAssignedIssue();
+    await insertRuns({
+      companyId: seeded.companyId,
+      agentId: seeded.coderId,
+      issueId: seeded.issueId,
+      count: DEFAULT_PRODUCTIVITY_REVIEW_NO_COMMENT_STREAK_RUNS,
+      now,
+    });
+
+    const settings = instanceSettingsService(db);
+    await settings.updateExperimental({ enableProductivityReviewReconciliation: false });
+    try {
+      const result = await productivityReviewService(db).reconcileProductivityReviews({
+        now,
+        companyId: seeded.companyId,
+      });
+
+      expect(result.disabled).toBe(true);
+      expect(result.scanned).toBe(0);
+      expect(result.created).toBe(0);
+      expect(await listProductivityReviews(seeded.companyId)).toHaveLength(0);
+    } finally {
+      // Restore the singleton default so later tests (which rely on the sweep running) pass.
+      await settings.updateExperimental({ enableProductivityReviewReconciliation: true });
+    }
+  });
+
+  it("runs normally when the reconciliation flag is enabled (default behavior preserved)", async () => {
+    const now = new Date("2026-04-28T12:00:00.000Z");
+    const seeded = await seedAssignedIssue();
+    await insertRuns({
+      companyId: seeded.companyId,
+      agentId: seeded.coderId,
+      issueId: seeded.issueId,
+      count: DEFAULT_PRODUCTIVITY_REVIEW_NO_COMMENT_STREAK_RUNS,
+      now,
+    });
+
+    const result = await productivityReviewService(db).reconcileProductivityReviews({
+      now,
+      companyId: seeded.companyId,
+    });
+
+    expect(result.disabled).toBe(false);
+    expect(result.created).toBe(1);
   });
 
   it("creates a long-active review without enabling a continuation hold", async () => {

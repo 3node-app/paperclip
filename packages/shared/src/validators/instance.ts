@@ -48,6 +48,10 @@ export const instanceExperimentalSettingsSchema = z.object({
   enableCloudSync: z.boolean().default(false),
   autoRestartDevServerWhenIdle: z.boolean().default(false),
   enableIssueGraphLivenessAutoRecovery: z.boolean().default(false),
+  // NOTE: unlike the other experimental flags this defaults to `true` — productivity-review
+  // reconciliation runs by default to preserve historical behavior. Operators set it to
+  // `false` to stop the reconciliation sweep (e.g. to conserve LLM quota). See NODE-256.
+  enableProductivityReviewReconciliation: z.boolean().default(true),
   issueGraphLivenessAutoRecoveryLookbackHours: z
     .number()
     .int()

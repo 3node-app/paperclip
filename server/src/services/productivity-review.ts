@@ -12,6 +12,7 @@ import {
 } from "@paperclipai/db";
 import { logger } from "../middleware/logger.js";
 import { logActivity } from "./activity-log.js";
+import { instanceSettingsService } from "./instance-settings.js";
 import { budgetService } from "./budgets.js";
 import { issueService } from "./issues.js";
 import {
@@ -763,6 +764,27 @@ export function productivityReviewService(db: Db, deps?: { enqueueWakeup?: Enque
     companyId?: string;
     thresholds?: Partial<ProductivityReviewThresholds>;
   }) {
+    // NODE-256: allow operators to switch off the reconciliation sweep entirely
+    // (it runs on every periodic recovery tick and creates LLM-driven review work).
+    // Defaults to enabled; only an explicit `false` disables it. Returning early —
+    // before the candidate query — avoids any DB/LLM work when disabled.
+    const experimental = await instanceSettingsService(db).getExperimental();
+    if (experimental.enableProductivityReviewReconciliation === false) {
+      return {
+        scanned: 0,
+        created: 0,
+        updated: 0,
+        existing: 0,
+        snoozed: 0,
+        creationCapped: 0,
+        skipped: 0,
+        failed: 0,
+        reviewIssueIds: [] as string[],
+        failedIssueIds: [] as string[],
+        disabled: true,
+      };
+    }
+
     const now = opts?.now ?? new Date();
     const thresholds = buildThresholds(opts?.thresholds);
     const candidates = await db
@@ -792,6 +814,7 @@ export function productivityReviewService(db: Db, deps?: { enqueueWakeup?: Enque
       failed: 0,
       reviewIssueIds: [] as string[],
       failedIssueIds: [] as string[],
+      disabled: false,
     };
 
     const prefixCache = new Map<string, string>();
