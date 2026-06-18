@@ -19,8 +19,8 @@ permissions:
 
 jobs:
   build-and-push:
-    runs-on: ubuntu-latest
-    timeout-minutes: 180
+    runs-on: [self-hosted, linux, ARM64]
+    timeout-minutes: 90
     # CD build: never cancel an in-flight master build. With frequent master
     # pushes and a slow multi-arch build, cancel-in-progress dropped every run
     # mid-build (NODE-234), so no image was ever published. Queue instead:
