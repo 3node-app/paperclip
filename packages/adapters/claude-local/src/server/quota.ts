@@ -473,6 +473,44 @@ export async function fetchClaudeCliQuota(): Promise<QuotaWindow[]> {
   return parseClaudeCliUsageText(rawText);
 }
 
+/**
+ * Same probe as captureClaudeCliUsageText, but routes the CLI to a specific
+ * CLAUDE_CONFIG_DIR. Used by the multi-account quota monitor to probe each
+ * connected account independently.
+ */
+export async function captureClaudeCliUsageTextForConfigDir(
+  configDir: string,
+  timeoutMs = 12_000,
+): Promise<string> {
+  const command = buildClaudeCliShellProbeCommand();
+  const env = createClaudeQuotaEnv();
+  env.CLAUDE_CONFIG_DIR = configDir;
+  try {
+    const { stdout, stderr } = await execFileAsync("sh", ["-c", command], {
+      env,
+      timeout: timeoutMs,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    const output = `${stdout}${stderr}`;
+    const cleaned = cleanTerminalText(output);
+    if (usageOutputLooksComplete(cleaned)) return output;
+    throw new Error("Claude CLI usage probe ended before rendering usage.");
+  } catch (error) {
+    const stdout =
+      typeof error === "object" && error !== null && "stdout" in error && typeof error.stdout === "string"
+        ? error.stdout
+        : "";
+    const stderr =
+      typeof error === "object" && error !== null && "stderr" in error && typeof error.stderr === "string"
+        ? error.stderr
+        : "";
+    const output = `${stdout}${stderr}`;
+    const cleaned = cleanTerminalText(output);
+    if (usageOutputLooksComplete(cleaned)) return output;
+    throw error instanceof Error ? error : new Error(String(error));
+  }
+}
+
 function formatProviderError(source: string, error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
   return `${source}: ${message}`;

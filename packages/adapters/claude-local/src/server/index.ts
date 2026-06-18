@@ -20,6 +20,16 @@ export {
   fetchWithTimeout,
   claudeConfigDir,
 } from "./quota.js";
+export {
+  ClaudeMultiAccountStore,
+  createDefaultStore as createDefaultMultiAccountStore,
+  isSessionLimitError,
+  probeAccountUsagePercent,
+  evaluateAutoPause,
+  type AccountSummary,
+  type AccountMeta,
+  type ActiveState,
+} from "./multi-account.js";
 import type { AdapterSessionCodec } from "@paperclipai/adapter-utils";
 
 function readNonEmptyString(value: unknown): string | null {

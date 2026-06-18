@@ -1,6 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  ClaudeMultiAccountStore,
+  createDefaultStore as createDefaultMultiAccountStore,
+  isSessionLimitError,
+} from "./multi-account.js";
 import type { AdapterExecutionContext, AdapterExecutionResult } from "@paperclipai/adapter-utils";
 import type { RunProcessResult } from "@paperclipai/adapter-utils/server-utils";
 import {
@@ -397,6 +402,22 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const effectiveWorkspaceCwd = useConfiguredInsteadOfAgentHome ? "" : workspaceCwd;
   const hasExplicitClaudeConfigDir =
     typeof configEnv.CLAUDE_CONFIG_DIR === "string" && configEnv.CLAUDE_CONFIG_DIR.trim().length > 0;
+  // Multi-account rotation: when no explicit CLAUDE_CONFIG_DIR override is set
+  // and execution is local, resolve the currently-active account from the
+  // credentials store. The store automatically rotates past accounts whose
+  // OAuth session limit was hit in the last 24h.
+  let multiAccountStore: ClaudeMultiAccountStore | null = null;
+  let multiAccountId: string | null = null;
+  let multiAccountDir: string | null = null;
+  if (!hasExplicitClaudeConfigDir && !executionTargetIsRemote) {
+    const candidateStore = createDefaultMultiAccountStore();
+    const resolved = await candidateStore.resolveAccountForUse();
+    if (resolved) {
+      multiAccountStore = candidateStore;
+      multiAccountId = resolved.id;
+      multiAccountDir = resolved.dir;
+    }
+  }
   const instructionsFilePath = asString(config.instructionsFilePath, "").trim();
   const instructionsFileDir = instructionsFilePath ? `${path.dirname(instructionsFilePath)}/` : "";
   const runtimeConfig = await buildClaudeRuntimeConfig({
@@ -544,6 +565,14 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   const remoteClaudeConfigDir = useManagedRemoteClaudeConfig && remoteClaudeRuntimeRoot
     ? path.posix.join(remoteClaudeRuntimeRoot, "config")
     : null;
+  if (multiAccountDir && multiAccountId) {
+    env.CLAUDE_CONFIG_DIR = multiAccountDir;
+    loggedEnv.CLAUDE_CONFIG_DIR = multiAccountDir;
+    await onLog(
+      "stdout",
+      `[paperclip] Using multi-account credentials store: ${multiAccountId} (${multiAccountDir}).\n`,
+    );
+  }
   if (remoteClaudeConfigDir && remoteClaudeConfigSeedDir) {
     env.CLAUDE_CONFIG_DIR = remoteClaudeConfigDir;
     loggedEnv.CLAUDE_CONFIG_DIR = remoteClaudeConfigDir;
@@ -837,6 +866,20 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         : transientUpstream
         ? "claude_transient_upstream"
         : null;
+      // Multi-account: when the upstream error is the OAuth session/weekly
+      // limit, mark the active account as exhausted so the next run picks the
+      // backup account automatically.
+      if (
+        transientUpstream &&
+        multiAccountStore &&
+        multiAccountId &&
+        isSessionLimitError(`${proc.stdout}\n${proc.stderr}\n${fallbackErrorMessage ?? ""}`)
+      ) {
+        // Fire-and-forget: don't block the response on the meta write.
+        void multiAccountStore
+          .markExhausted(multiAccountId, "session-limit detected in adapter output")
+          .catch(() => undefined);
+      }
       return {
         exitCode: proc.exitCode,
         signal: proc.signal,
