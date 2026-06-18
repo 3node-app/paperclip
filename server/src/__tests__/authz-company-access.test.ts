@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { assertBoardOrgAccess, assertCompanyAccess, hasBoardOrgAccess } from "../routes/authz.js";
+import {
+  assertBoardOrgAccess,
+  assertCompanyAccess,
+  hasBoardOrgAccess,
+  hasCompanyOwnerMembership,
+} from "../routes/authz.js";
 
 function makeReq(input: {
   method?: string;
@@ -103,6 +108,116 @@ describe("assertCompanyAccess", () => {
     });
 
     expect(() => assertCompanyAccess(req, "company-1")).not.toThrow();
+  });
+});
+
+describe("hasCompanyOwnerMembership", () => {
+  it("accepts an active owner membership on the target company", () => {
+    const req = makeReq({
+      actor: {
+        type: "board",
+        userId: "user-1",
+        source: "session",
+        companyIds: ["company-1"],
+        memberships: [
+          { companyId: "company-1", membershipRole: "owner", status: "active" },
+        ],
+        isInstanceAdmin: false,
+      },
+    });
+
+    expect(hasCompanyOwnerMembership(req, "company-1")).toBe(true);
+  });
+
+  it("rejects non-owner roles", () => {
+    const req = makeReq({
+      actor: {
+        type: "board",
+        userId: "user-1",
+        source: "session",
+        companyIds: ["company-1"],
+        memberships: [
+          { companyId: "company-1", membershipRole: "operator", status: "active" },
+        ],
+        isInstanceAdmin: false,
+      },
+    });
+
+    expect(hasCompanyOwnerMembership(req, "company-1")).toBe(false);
+  });
+
+  it("rejects an owner membership that is not active", () => {
+    const req = makeReq({
+      actor: {
+        type: "board",
+        userId: "user-1",
+        source: "session",
+        companyIds: ["company-1"],
+        memberships: [
+          { companyId: "company-1", membershipRole: "owner", status: "suspended" },
+        ],
+        isInstanceAdmin: false,
+      },
+    });
+
+    expect(hasCompanyOwnerMembership(req, "company-1")).toBe(false);
+  });
+
+  it("rejects an owner membership on a different company", () => {
+    const req = makeReq({
+      actor: {
+        type: "board",
+        userId: "user-1",
+        source: "session",
+        companyIds: ["company-2"],
+        memberships: [
+          { companyId: "company-2", membershipRole: "owner", status: "active" },
+        ],
+        isInstanceAdmin: false,
+      },
+    });
+
+    expect(hasCompanyOwnerMembership(req, "company-1")).toBe(false);
+  });
+
+  it("treats local_implicit board as owner-equivalent (loopback operator)", () => {
+    const req = makeReq({
+      actor: {
+        type: "board",
+        userId: "local-board",
+        source: "local_implicit",
+        isInstanceAdmin: true,
+      },
+    });
+
+    expect(hasCompanyOwnerMembership(req, "company-1")).toBe(true);
+  });
+
+  it("treats instance admins as owner-equivalent", () => {
+    const req = makeReq({
+      actor: {
+        type: "board",
+        userId: "admin-1",
+        source: "session",
+        companyIds: [],
+        memberships: [],
+        isInstanceAdmin: true,
+      },
+    });
+
+    expect(hasCompanyOwnerMembership(req, "company-1")).toBe(true);
+  });
+
+  it("rejects non-board actors (agents)", () => {
+    const req = makeReq({
+      actor: {
+        type: "agent",
+        agentId: "agent-1",
+        companyId: "company-1",
+      } as Express.Request["actor"],
+    });
+
+    expect(hasCompanyOwnerMembership(req, "company-1")).toBe(false);
   });
 });
 

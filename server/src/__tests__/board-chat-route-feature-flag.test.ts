@@ -11,6 +11,8 @@ const mockIssueService = vi.hoisted(() => ({
   listComments: vi.fn(),
 }));
 const mockSpawn = vi.hoisted(() => vi.fn());
+const mockHasCompanyOwnerMembership = vi.hoisted(() => vi.fn());
+const mockLogActivity = vi.hoisted(() => vi.fn());
 
 vi.mock("../services/index.js", () => ({
   instanceSettingsService: () => ({ getExperimental: mockGetExperimental }),
@@ -19,9 +21,14 @@ vi.mock("../services/index.js", () => ({
 
 vi.mock("node:child_process", () => ({ spawn: mockSpawn }));
 
+vi.mock("../services/activity-log.js", () => ({
+  logActivity: mockLogActivity,
+}));
+
 vi.mock("../routes/authz.js", () => ({
-  getActorInfo: () => ({ actorId: "user-1", agentId: null, runId: null }),
+  getActorInfo: () => ({ actorType: "user", actorId: "user-1", agentId: null, runId: null }),
   assertCompanyAccess: () => {},
+  hasCompanyOwnerMembership: mockHasCompanyOwnerMembership,
 }));
 
 async function createApp(deploymentMode: "local_trusted" | "authenticated" = "local_trusted") {
@@ -32,9 +39,24 @@ async function createApp(deploymentMode: "local_trusted" | "authenticated" = "lo
   return app;
 }
 
+function makeFakeProc() {
+  const proc = new EventEmitter() as any;
+  proc.stdout = new EventEmitter();
+  proc.stderr = new EventEmitter();
+  proc.stdin = { write: vi.fn(), end: vi.fn() };
+  proc.exitCode = null;
+  proc.killed = false;
+  proc.kill = vi.fn(() => {
+    proc.killed = true;
+  });
+  return proc;
+}
+
 describe("POST /api/board/chat/stream feature flag guard (PAP-137)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default: caller is an owner (only consulted in authenticated mode).
+    mockHasCompanyOwnerMembership.mockReturnValue(true);
   });
 
   it("returns 403 FEATURE_DISABLED when enableConferenceRoomChat is off", async () => {
@@ -55,8 +77,9 @@ describe("POST /api/board/chat/stream feature flag guard (PAP-137)", () => {
     expect(mockIssueService.create).not.toHaveBeenCalled();
   });
 
-  it("returns 403 DEPLOYMENT_MODE_UNSUPPORTED outside local_trusted even with the flag on", async () => {
+  it("returns 403 OWNER_MEMBERSHIP_REQUIRED in authenticated mode for non-owners", async () => {
     mockGetExperimental.mockResolvedValue({ enableConferenceRoomChat: true });
+    mockHasCompanyOwnerMembership.mockReturnValue(false);
     const app = await createApp("authenticated");
 
     const res = await request(app)
@@ -64,8 +87,81 @@ describe("POST /api/board/chat/stream feature flag guard (PAP-137)", () => {
       .send({ companyId: "company-1", message: "hello" });
 
     expect(res.status).toBe(403);
-    expect(res.body.code).toBe("DEPLOYMENT_MODE_UNSUPPORTED");
+    expect(res.body.code).toBe("OWNER_MEMBERSHIP_REQUIRED");
+    // No spawn, no persistence for a rejected caller.
+    expect(mockSpawn).not.toHaveBeenCalled();
     expect(mockIssueService.addComment).not.toHaveBeenCalled();
+  });
+
+  it("admits an owner in authenticated mode (reaches the spawn)", async () => {
+    mockGetExperimental.mockResolvedValue({ enableConferenceRoomChat: true });
+    mockHasCompanyOwnerMembership.mockReturnValue(true);
+    mockIssueService.list.mockResolvedValue([
+      { id: "issue-1", title: "Board Operations", status: "todo" },
+    ]);
+    mockIssueService.addComment.mockResolvedValue({ id: "comment-1" });
+    mockIssueService.listComments.mockResolvedValue([]);
+    const fakeProc = makeFakeProc();
+    mockSpawn.mockReturnValue(fakeProc);
+    const app = await createApp("authenticated");
+
+    const req = request(app)
+      .post("/api/board/chat/stream")
+      .send({ companyId: "company-1", message: "hello" });
+    const pending = req.then(
+      () => undefined,
+      () => undefined,
+    );
+
+    await vi.waitFor(() => expect(mockSpawn).toHaveBeenCalled());
+    // The privileged invocation is audited (metadata only, no content).
+    await vi.waitFor(() => expect(mockLogActivity).toHaveBeenCalled());
+    const auditCall = mockLogActivity.mock.calls[0][1];
+    expect(auditCall.action).toBe("board.chat.invoked");
+    expect(auditCall.details.messageLength).toBe("hello".length);
+    expect(JSON.stringify(auditCall)).not.toContain("hello");
+
+    fakeProc.exitCode = 0;
+    fakeProc.emit("close", 0);
+    await pending;
+  });
+
+  it("rate-limits a single actor after 10 invocations in authenticated mode", async () => {
+    mockGetExperimental.mockResolvedValue({ enableConferenceRoomChat: true });
+    mockHasCompanyOwnerMembership.mockReturnValue(true);
+    mockIssueService.list.mockResolvedValue([
+      { id: "issue-1", title: "Board Operations", status: "todo" },
+    ]);
+    mockIssueService.addComment.mockResolvedValue({ id: "comment-1" });
+    mockIssueService.listComments.mockResolvedValue([]);
+    // Reuse one app so the in-memory token bucket accumulates across requests.
+    const app = await createApp("authenticated");
+
+    for (let i = 0; i < 10; i++) {
+      const fakeProc = makeFakeProc();
+      mockSpawn.mockReturnValue(fakeProc);
+      const req = request(app)
+        .post("/api/board/chat/stream")
+        .send({ companyId: "company-1", message: `m${i}` });
+      const pending = req.then(
+        () => undefined,
+        () => undefined,
+      );
+      await vi.waitFor(() => expect(fakeProc.stdin.end).toHaveBeenCalled());
+      fakeProc.exitCode = 0;
+      fakeProc.emit("close", 0);
+      await pending;
+    }
+
+    // 11th invocation is refused before any spawn.
+    mockSpawn.mockClear();
+    const res = await request(app)
+      .post("/api/board/chat/stream")
+      .send({ companyId: "company-1", message: "over" });
+
+    expect(res.status).toBe(429);
+    expect(res.body.code).toBe("BOARD_CHAT_RATE_LIMITED");
+    expect(mockSpawn).not.toHaveBeenCalled();
   });
 
   it("lets requests past the guard when the flag is on (400 on missing body, not 403)", async () => {
@@ -82,21 +178,9 @@ describe("POST /api/board/chat/stream feature flag guard (PAP-137)", () => {
 });
 
 describe("board-chat client disconnect", () => {
-  function makeFakeProc() {
-    const proc = new EventEmitter() as any;
-    proc.stdout = new EventEmitter();
-    proc.stderr = new EventEmitter();
-    proc.stdin = { write: vi.fn(), end: vi.fn() };
-    proc.exitCode = null;
-    proc.killed = false;
-    proc.kill = vi.fn(() => {
-      proc.killed = true;
-    });
-    return proc;
-  }
-
   it("kills the spawned subprocess when the client disconnects mid-stream", async () => {
     mockGetExperimental.mockResolvedValue({ enableConferenceRoomChat: true });
+    mockHasCompanyOwnerMembership.mockReturnValue(true);
     mockIssueService.list.mockResolvedValue([
       { id: "issue-1", title: "Board Operations", status: "todo" },
     ]);

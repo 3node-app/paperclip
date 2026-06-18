@@ -6,7 +6,8 @@ import { fileURLToPath } from "node:url";
 import type { Db } from "@paperclipai/db";
 import type { DeploymentMode } from "@paperclipai/shared";
 import { instanceSettingsService, issueService } from "../services/index.js";
-import { assertCompanyAccess, getActorInfo } from "./authz.js";
+import { logActivity } from "../services/activity-log.js";
+import { assertCompanyAccess, getActorInfo, hasCompanyOwnerMembership } from "./authz.js";
 
 /**
  * Strip structured action signals (`%%ACTIONS%%{...}%%/ACTIONS%%`) from a
@@ -62,12 +63,33 @@ export function isConciergeReply(comment: {
 /** Max simultaneous `claude` subprocesses across all board-chat requests. */
 const MAX_CONCURRENT_BOARD_CHATS = 3;
 
+/** Per-actor invocation cap and sliding window for board-chat spawns. */
+const BOARD_CHAT_RATE_LIMIT = 10;
+const BOARD_CHAT_RATE_WINDOW_MS = 60 * 60 * 1000;
+
 export function boardChatRoutes(
   db: Db,
   opts: { deploymentMode: DeploymentMode },
 ) {
   const router = Router();
   let liveBoardChats = 0;
+
+  // Sliding-window invocation timestamps per actor id (in-memory, per process).
+  // The spawn exposes the operator's `claude` session, so we cap how often any
+  // one actor can trigger it independent of the concurrency gate.
+  const chatTimestampsByActor = new Map<string, number[]>();
+  function checkRateLimit(actorId: string): boolean {
+    const now = Date.now();
+    const cutoff = now - BOARD_CHAT_RATE_WINDOW_MS;
+    const recent = (chatTimestampsByActor.get(actorId) ?? []).filter((t) => t > cutoff);
+    if (recent.length >= BOARD_CHAT_RATE_LIMIT) {
+      chatTimestampsByActor.set(actorId, recent);
+      return false;
+    }
+    recent.push(now);
+    chatTimestampsByActor.set(actorId, recent);
+    return true;
+  }
 
   // The board skill is read from disk once and cached. Resolves to the
   // repo-root `skills/paperclip-board/SKILL.md` whether running from
@@ -108,13 +130,19 @@ export function boardChatRoutes(
     }
 
     // The relay spawns the operator's local `claude` CLI with permissions
-    // skipped (it must run headless), so it is only safe where the requester
-    // IS the machine operator: local_trusted is loopback-only single-operator
-    // by construction (see server/src/index.ts boot guards). Refuse everywhere
-    // else rather than lending the server's shell to remote users.
-    if (opts.deploymentMode !== "local_trusted") {
+    // skipped (it must run headless). Two deployment modes can host it safely:
+    //   - local_trusted: loopback-only single-operator by construction (see
+    //     server/src/index.ts boot guards) — the requester IS the operator.
+    //   - authenticated: CF Access + Better Auth multi-user. The spawn is only
+    //     safe for a verified company OWNER, enforced below once companyId is
+    //     known; lesser roles must not borrow the server's shell.
+    // Any other/future mode is refused.
+    if (
+      opts.deploymentMode !== "local_trusted" &&
+      opts.deploymentMode !== "authenticated"
+    ) {
       res.status(403).json({
-        error: "Board chat is only available on local single-operator instances",
+        error: "Board chat is not available in this deployment mode",
         code: "DEPLOYMENT_MODE_UNSUPPORTED",
       });
       return;
@@ -134,6 +162,30 @@ export function boardChatRoutes(
     // The body-supplied companyId must belong to the authenticated actor —
     // it scopes issue reads/writes below and is exported to the subprocess.
     assertCompanyAccess(req, companyId);
+
+    // In `authenticated` (multi-user) mode the loopback isolation that makes
+    // local_trusted safe is gone, so the privileged spawn is owner-only.
+    if (
+      opts.deploymentMode === "authenticated" &&
+      !hasCompanyOwnerMembership(req, companyId)
+    ) {
+      res.status(403).json({
+        error: "Board chat requires company owner membership",
+        code: "OWNER_MEMBERSHIP_REQUIRED",
+      });
+      return;
+    }
+
+    // Per-actor rate limit (10/hour): cap how often the operator's `claude`
+    // session can be spawned, independent of the concurrency gate below.
+    const actor = getActorInfo(req);
+    if (!checkRateLimit(actor.actorId)) {
+      res.status(429).json({
+        error: "Board chat rate limit exceeded — max 10 per hour",
+        code: "BOARD_CHAT_RATE_LIMITED",
+      });
+      return;
+    }
 
     // Back-pressure: each request holds a subprocess + SSE stream for up to
     // 2 minutes; cap simultaneous spawns instead of forking without bound.
@@ -180,12 +232,30 @@ export function boardChatRoutes(
     // Persist the user's message. Use the authenticated board/user actor so
     // attribution and author-type checks pass; "board" (the local fallback)
     // is distinct from the "board-concierge" sentinel used for replies.
-    const actor = getActorInfo(req);
     await issueSvc.addComment(resolvedIssueId, message, {
       agentId: actor.agentId ?? undefined,
       userId: actor.agentId ? undefined : actor.actorId,
       runId: actor.runId,
     });
+
+    // Audit trail for spawn abuse — record metadata only, never the message
+    // content (length alone is enough to flag anomalies). Best-effort: an
+    // audit write failure must not block the chat.
+    try {
+      await logActivity(db, {
+        companyId,
+        actorType: actor.actorType,
+        actorId: actor.actorId,
+        action: "board.chat.invoked",
+        entityType: "issue",
+        entityId: resolvedIssueId,
+        agentId: actor.agentId,
+        runId: actor.runId,
+        details: { messageLength: message.length, taskId: taskId ?? null },
+      });
+    } catch {
+      /* best effort */
+    }
 
     // Build conversation history from recent comments (oldest first).
     const comments = await issueSvc.listComments(resolvedIssueId, { order: "asc" });

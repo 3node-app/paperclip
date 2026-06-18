@@ -50,6 +50,36 @@ export function assertInstanceAdmin(req: Request) {
   throw forbidden("Instance admin access required");
 }
 
+/**
+ * Predicate: is the requester a board user with ACTIVE OWNER membership on
+ * `companyId`? Used to gate privileged surfaces (e.g. Board Chat, which spawns
+ * the operator's `claude` CLI) in `authenticated` deployment mode, where
+ * loopback isolation no longer protects the spawn.
+ *
+ * Returns a boolean rather than throwing so callers that speak a custom
+ * response protocol (SSE / coded JSON) can emit their own error shape.
+ *
+ * - `local_implicit` board (loopback single-operator) IS the machine operator
+ *   by construction → owner-equivalent.
+ * - Instance admins are operator-level and outrank company owners.
+ * - Otherwise require an active membership with role `owner` on the company.
+ */
+export function hasCompanyOwnerMembership(req: Request, companyId: string): boolean {
+  if (req.actor.type !== "board") {
+    return false;
+  }
+  if (req.actor.source === "local_implicit" || req.actor.isInstanceAdmin) {
+    return true;
+  }
+  const memberships = Array.isArray(req.actor.memberships) ? req.actor.memberships : [];
+  const membership = memberships.find((item) => item.companyId === companyId);
+  return (
+    !!membership &&
+    membership.status === "active" &&
+    membership.membershipRole === "owner"
+  );
+}
+
 export function assertCompanyAccess(req: Request, companyId: string) {
   assertAuthenticated(req);
   if (req.actor.type === "agent" && req.actor.companyId !== companyId) {
