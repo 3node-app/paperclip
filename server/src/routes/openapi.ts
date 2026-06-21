@@ -2461,6 +2461,25 @@ registry.registerPath({
   responses: { 200: r.ok(), 400: r.badRequest, 401: r.unauthorized },
 });
 
+// ─── Claude multi-account (operator credential management) ───────────────────
+
+registry.registerPath({
+  method: "get",
+  path: "/api/instance/claude-accounts",
+  tags: ["instance"],
+  summary: "List Claude OAuth accounts in the multi-account store",
+  responses: { 200: r.ok(), 401: r.unauthorized, 403: r.forbidden },
+});
+
+registry.registerPath({
+  method: "post",
+  path: "/api/instance/claude-accounts",
+  tags: ["instance"],
+  summary: "Create a new Claude OAuth account slot",
+  request: { body: jsonBody(z.object({ label: z.string().min(1).max(80) })) },
+  responses: { 201: r.ok(), 400: r.badRequest, 401: r.unauthorized, 403: r.forbidden },
+});
+
 // ─── Board chat (Conference Room Chat, experimental) ──────────────────────────
 
 registry.registerPath({
