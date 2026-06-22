@@ -5465,16 +5465,19 @@ export function issueRoutes(
         });
       }
 
-      void queueIssueAssignmentWakeup({
-        heartbeat,
-        db,
-        issue,
-        reason: "issue_assigned",
-        mutation: "accepted_plan_decomposition",
-        contextSource: "issue.accepted_plan_decomposition",
-        requestedByActorType: actor.actorType,
-        requestedByActorId: actor.actorId,
-      });
+      if (!serializedBlockedChildIds.has(issue.id)) {
+        void queueIssueAssignmentWakeup({
+          heartbeat,
+          db,
+          issue,
+          reason: "issue_assigned",
+          mutation: "accepted_plan_decomposition",
+          contextSource: "issue.accepted_plan_decomposition",
+          requestedByActorType: actor.actorType,
+          requestedByActorId: actor.actorId,
+        });
+      }
+      await queueTaskWatchdogEvaluation(issue, actor.runId);
     }
     await blockWatchdogParentOnCurrentChild({
       actor,
