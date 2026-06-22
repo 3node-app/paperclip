@@ -7419,32 +7419,8 @@ export function issueRoutes(
       return;
     }
     assertCompanyAccess(req, issue.companyId);
-    // Patch B (NODE-135): split the comment-insertion authorization from the field/status-mutation
-    // authorization. A pure communicative comment only needs read access + company membership, so a
-    // non-assignee agent can comment on an in_review (or otherwise checked-out) issue. Any payload
-    // that carries transition intent still goes through the full mutation gate so the assignee
-    // write-lock is preserved. The intent signals, mirrored from the branches below:
-    //   - reopen / resume  -> moves the issue back to todo (see effectiveMoveToTodoRequested branch)
-    //   - interrupt        -> cancels the active run (board-only branch)
-    //   - structured approval on a pending in_review issue -> auto-completes to done
-    //     (shouldAutoApproveReviewComment branch). This is an approval-between-agents path, which is
-    //     explicitly OUT OF SCOPE for this patch, so it must keep the mutation gate.
-    // SECURITY: keep this conservative — when in doubt, route through the mutation gate.
-    const commentCarriesMutationIntent =
-      req.body.reopen === true ||
-      req.body.resume === true ||
-      req.body.interrupt === true ||
-      isClosedIssueStatus(issue.status) ||
-      (issue.status === "in_review" &&
-        parseIssueExecutionState(issue.executionState)?.status === "pending" &&
-        isApprovalReviewComment(req.body.body));
-    let commentAccessDecision: Awaited<ReturnType<typeof assertAgentIssueCommentAllowed>> = true;
-    if (commentCarriesMutationIntent) {
-      if (!(await assertAgentIssueMutationAllowed(req, res, issue))) return;
-    } else {
-      commentAccessDecision = await assertAgentIssueCommentAllowed(req, res, issue);
-      if (!commentAccessDecision) return;
-    }
+    const commentAccessDecision = await assertAgentIssueCommentAllowed(req, res, issue);
+    if (!commentAccessDecision) return;
     if (!assertStructuredCommentFieldsAllowed(req, res, {
       presentation: req.body.presentation,
       metadata: req.body.metadata,

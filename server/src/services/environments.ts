@@ -307,7 +307,16 @@ export function environmentService(db: Db) {
           where: sql`${environments.driver} = 'sandbox' AND (${environments.metadata} ->> 'managedByPaperclip')::boolean = true`,
         })
         .returning()
-        .then((rows) => rows[0] ?? null);
+        .then((rows) => rows[0] ?? null)
+        .catch((error) => {
+          if (
+            hasConstraintName(error, "environments_name_idx")
+            || hasConstraintName(error, "environments_managed_sandbox_idx")
+          ) {
+            return null;
+          }
+          throw error;
+        });
       if (row) return toEnvironment(row);
 
       // Lost the race (or a managed row appeared between our SELECT and INSERT):
