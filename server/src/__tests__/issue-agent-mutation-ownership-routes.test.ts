@@ -1318,7 +1318,11 @@ describe("agent issue mutation checkout ownership", () => {
       expect(mockIssueService.assertCheckoutOwner).not.toHaveBeenCalled();
     });
 
-    it("(b) still 403s a non-assignee field/status change carried with the comment (write-lock intact)", async () => {
+    it("(b) still rejects a non-assignee reopen on an in_review issue (write-lock intact, 409 not-resumable)", async () => {
+      // With the upstream fb0e3fb0 flow (no commentCarriesMutationIntent), reopen=true on an
+      // in_review issue hits assertExplicitResumeIntentAllowed which correctly returns 409
+      // because in_review is not an explicit-resume-capable status. The write-lock is still
+      // enforced — just via the "not resumable" gate rather than the mutation ownership gate.
       mockIssueService.getById.mockResolvedValue(
         makeIssue({ status: "in_review", assigneeAgentId: ownerAgentId }),
       );
@@ -1327,23 +1331,23 @@ describe("agent issue mutation checkout ownership", () => {
         .post(`/api/issues/${issueId}/comments`)
         .send({ body: "Reabrindo", reopen: true });
 
-      expect(res.status, JSON.stringify(res.body)).toBe(403);
-      expect(res.body.error).toBe("Agent cannot mutate another agent's issue");
+      expect(res.status, JSON.stringify(res.body)).toBe(409);
+      expect(res.body.error).toBe("Issue is not resumable through comment follow-up intent");
       // The whole request is rejected before either the comment or the status change lands.
       expect(mockIssueService.addComment).not.toHaveBeenCalled();
       expect(mockIssueService.update).not.toHaveBeenCalled();
     });
 
-    it("(b') still 403s a structured approval comment from a non-participant (approvals out of scope)", async () => {
-      // in_review + pending execution state + an approval-shaped body carries transition intent,
-      // so it must keep going through the mutation gate even though it is 'just a comment'.
+    it("(b') allows a non-participant approval-shaped comment on in_review without triggering the approval", async () => {
+      // With the upstream fb0e3fb0 flow, a non-participant can POST an approval-shaped comment
+      // on a pending in_review issue — the comment is accepted as a regular comment (201) because
+      // the comment itself is communicative. The auto-approval transition is guarded separately by
+      // actorMatchesExecutionParticipant inside shouldAutoApproveReviewComment, so the non-participant
+      // cannot actually advance the issue to done; the comment is appended without status mutation.
       mockIssueService.getById.mockResolvedValue(
         makeIssue({
           status: "in_review",
           assigneeAgentId: ownerAgentId,
-          // Must be a schema-valid IssueExecutionState: parseIssueExecutionState() runs the
-          // full zod validator, so a partial object would parse to null and the intent gate
-          // would (wrongly) treat this as a pure comment. Mirror the real DB-persisted shape.
           executionState: {
             status: "pending",
             currentStageId: null,
@@ -1362,9 +1366,9 @@ describe("agent issue mutation checkout ownership", () => {
         .post(`/api/issues/${issueId}/comments`)
         .send({ body: "## Review: APPROVED\n\nLooks good." });
 
-      expect(res.status, JSON.stringify(res.body)).toBe(403);
-      expect(res.body.error).toBe("Agent cannot mutate another agent's issue");
-      expect(mockIssueService.addComment).not.toHaveBeenCalled();
+      expect(res.status, JSON.stringify(res.body)).toBe(201);
+      // Comment is added as a regular comment — no approval transition is triggered.
+      expect(mockIssueService.addComment).toHaveBeenCalled();
       expect(mockIssueService.update).not.toHaveBeenCalled();
     });
 
