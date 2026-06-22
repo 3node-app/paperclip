@@ -2408,12 +2408,27 @@ export function issueRoutes(
       res.status(403).json({ error: "Agent authentication required" });
       return false;
     }
-    const boundaryDecision = await decideIssueAccess(req, issue, "issue:read");
+    const watchdogScope = await resolveTaskWatchdogMutationScope(db, req.actor);
+    if (watchdogScope.kind !== "none") {
+      const scopeResult = await taskWatchdogScopeAllowsIssueMutation(db, watchdogScope, issue);
+      if (scopeResult.kind === "invalid") {
+        res.status(403).json({
+          error: scopeResult.detail,
+          details: {
+            issueId: issue.id,
+            securityPrinciples: ["Least Privilege", "Complete Mediation", "Fail Securely"],
+          },
+        });
+        return false;
+      }
+      return assertFreshTaskWatchdogSourceMutation(res, watchdogScope, issue);
+    }
+    const boundaryDecision = await decideIssueAccess(req, issue, "issue:comment");
     if (!boundaryDecision.allowed) {
       res.status(403).json({ error: "Issue is outside this actor's authorization boundary" });
       return false;
     }
-    return true;
+    return boundaryDecision;
   }
 
   function isStatusOnlyCheapRecoveryContext(contextSnapshot: unknown) {
@@ -7420,10 +7435,12 @@ export function issueRoutes(
       (issue.status === "in_review" &&
         parseIssueExecutionState(issue.executionState)?.status === "pending" &&
         isApprovalReviewComment(req.body.body));
+    let commentAccessDecision: Awaited<ReturnType<typeof assertAgentIssueCommentAllowed>> = true;
     if (commentCarriesMutationIntent) {
       if (!(await assertAgentIssueMutationAllowed(req, res, issue))) return;
-    } else if (!(await assertAgentIssueCommentAllowed(req, res, issue))) {
-      return;
+    } else {
+      commentAccessDecision = await assertAgentIssueCommentAllowed(req, res, issue);
+      if (!commentAccessDecision) return;
     }
     if (!assertStructuredCommentFieldsAllowed(req, res, {
       presentation: req.body.presentation,
