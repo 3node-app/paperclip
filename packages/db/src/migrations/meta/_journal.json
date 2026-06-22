@@ -719,15 +719,36 @@
     {
       "idx": 102,
       "version": "7",
-      "when": 1781500000000,
-      "tag": "0102_project_workspace_materialization",
+      "when": 1781490100000,
+      "tag": "0102_managed_sandbox_dedup_index",
       "breakpoints": true
     },
     {
       "idx": 103,
       "version": "7",
-      "when": 1781510000000,
-      "tag": "0103_environment_managed_k8s_unique",
+      "when": 1781490200000,
+      "tag": "0103_agent_error_reason",
+      "breakpoints": true
+    },
+    {
+      "idx": 104,
+      "version": "7",
+      "when": 1781733000000,
+      "tag": "0104_issue_watchdogs",
+      "breakpoints": true
+    },
+    {
+      "idx": 105,
+      "version": "7",
+      "when": 1781902000000,
+      "tag": "0105_instance_scoped_environments",
+      "breakpoints": true
+    },
+    {
+      "idx": 106,
+      "version": "7",
+      "when": 1781500000000,
+      "tag": "0106_project_workspace_materialization",
       "breakpoints": true
     }
   ]

@@ -70,6 +70,7 @@ DROP INDEX IF EXISTS "environments_company_status_idx";--> statement-breakpoint
 DROP INDEX IF EXISTS "environments_company_driver_idx";--> statement-breakpoint
 DROP INDEX IF EXISTS "environments_company_name_idx";--> statement-breakpoint
 ALTER TABLE "environments" DROP CONSTRAINT IF EXISTS "environments_company_id_companies_id_fk";--> statement-breakpoint
+DROP INDEX IF EXISTS "environments_company_managed_k8s_idx";--> statement-breakpoint
 ALTER TABLE "environments" DROP COLUMN "company_id";--> statement-breakpoint
 INSERT INTO "environments" (
   "id",

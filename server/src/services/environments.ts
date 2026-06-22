@@ -284,10 +284,10 @@ export function environmentService(db: Db) {
         return toEnvironment(updated);
       }
 
-      // Concurrency: the partial unique index `environments_company_managed_k8s_idx`
-      // (one managed k8s sandbox per company) makes concurrent creates safe at the
+      // Concurrency: the partial unique index `environments_managed_sandbox_idx`
+      // (one managed sandbox per instance) makes concurrent creates safe at the
       // DB level. Two simultaneous callers (e.g. concurrent heartbeats lazily
-      // provisioning a new company) collapse to a single row: the loser's insert is
+      // provisioning a new instance) collapse to a single row: the loser's insert is
       // a no-op via onConflictDoNothing, and it then re-reads the winning row.
       const row = await db
         .insert(environments)
@@ -303,8 +303,8 @@ export function environmentService(db: Db) {
           updatedAt: now,
         })
         .onConflictDoNothing({
-          target: environments.companyId,
-          where: sql`${environments.driver} = 'sandbox' AND ${environments.metadata} ->> 'managedKubernetesSandbox' = 'true'`,
+          target: [environments.driver],
+          where: sql`${environments.driver} = 'sandbox' AND (${environments.metadata} ->> 'managedByPaperclip')::boolean = true`,
         })
         .returning()
         .then((rows) => rows[0] ?? null);
@@ -315,7 +315,7 @@ export function environmentService(db: Db) {
       const winner = await db
         .select()
         .from(environments)
-        .where(and(eq(environments.companyId, companyId), eq(environments.driver, "sandbox")))
+        .where(eq(environments.driver, "sandbox"))
         .then(
           (rows) =>
             rows.find(

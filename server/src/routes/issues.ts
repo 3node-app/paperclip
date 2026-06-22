@@ -98,6 +98,11 @@ import {
   maybeWakeCeoForApprovalPending,
   resolveActiveCeoAgentId,
 } from "../services/approval-wakeup.js";
+import {
+  resolveTaskWatchdogMutationScope,
+  taskWatchdogScopeAllowsIssueMutation,
+} from "../services/task-watchdog-scope.js";
+import type { TaskWatchdogServiceDeps, taskWatchdogService } from "../services/task-watchdogs.js";
 import { logger } from "../middleware/logger.js";
 import { conflict, forbidden, HttpError, notFound, unauthorized, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
@@ -1875,7 +1880,7 @@ export function issueRoutes(
     return false;
   }
 
-  async function assertAgentIssueCommentAllowed(
+  async function assertTaskWatchdogCommentScope(
     req: Request,
     res: Response,
     issue: {
@@ -2058,6 +2063,71 @@ export function issueRoutes(
       });
     }
     return true;
+  }
+
+  async function assertFreshTaskWatchdogSourceMutation(
+    res: Response,
+    scope: Awaited<ReturnType<typeof resolveTaskWatchdogMutationScope>>,
+    issue: { id: string },
+  ) {
+    if (scope.kind !== "watchdog") return true;
+    if (scope.watchdogIssueId && issue.id === scope.watchdogIssueId) return true;
+
+    const revalidated = await taskWatchdogsSvc.revalidateMutationScope(scope);
+    if (revalidated.allowed) return true;
+    res.status(409).json({
+      error: revalidated.reason,
+      details: {
+        watchedIssueId: scope.watchedIssueId,
+        watchdogId: scope.watchdogId,
+        runStopFingerprint: scope.stopFingerprint,
+        currentState: revalidated.classification?.state ?? null,
+        currentStopFingerprint: revalidated.classification && "stopFingerprint" in revalidated.classification
+          ? revalidated.classification.stopFingerprint
+          : null,
+      },
+    });
+    return false;
+  }
+
+  async function rejectTaskWatchdogConfigMutation(req: Request, res: Response) {
+    if (req.actor.type !== "agent") return false;
+    const scope = await resolveTaskWatchdogMutationScope(db, req.actor);
+    if (scope.kind !== "watchdog") return false;
+    res.status(403).json({
+      error: "Task-watchdog runs cannot change watchdog configuration.",
+      details: {
+        watchedIssueId: scope.watchedIssueId,
+        watchdogId: scope.watchdogId,
+        securityPrinciples: ["Least Privilege", "Complete Mediation", "Fail Securely"],
+      },
+    });
+    return true;
+  }
+
+  async function assertTaskWatchdogIssueMutationAllowed(
+    req: Request,
+    res: Response,
+    issue: {
+      id: string;
+      companyId: string;
+      parentId?: string | null;
+    },
+    opts: { allowWatchdogIssue?: boolean } = {},
+  ) {
+    if (req.actor.type !== "agent") return true;
+    const scope = await resolveTaskWatchdogMutationScope(db, req.actor);
+    if (scope.kind === "none") return true;
+    const result = await taskWatchdogScopeAllowsIssueMutation(db, scope, issue, opts);
+    if (result.kind !== "invalid") return assertFreshTaskWatchdogSourceMutation(res, scope, issue);
+    res.status(403).json({
+      error: result.detail,
+      details: {
+        issueId: issue.id,
+        securityPrinciples: ["Least Privilege", "Complete Mediation", "Fail Securely"],
+      },
+    });
+    return false;
   }
 
   // Patch B (NODE-135): gate for the *communicative* act of inserting a comment, distinct from
@@ -4805,7 +4875,6 @@ export function issueRoutes(
 
     void queueIssueAssignmentWakeup({
       heartbeat,
-      db,
       issue,
       reason: "issue_assigned",
       mutation: "create",
@@ -4940,7 +5009,6 @@ export function issueRoutes(
 
     void queueIssueAssignmentWakeup({
       heartbeat,
-      db,
       issue,
       reason: "issue_assigned",
       mutation: "create",
