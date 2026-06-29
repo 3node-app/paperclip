@@ -17,6 +17,8 @@ import { logger } from "../middleware/logger.js";
 import { accessService, projectService, logActivity, workspaceOperationService } from "../services/index.js";
 import { materializeProjectWorkspace } from "../services/project-workspace-materialization.js";
 import { conflict, forbidden } from "../errors.js";
+import { externalObjectService } from "../services/external-objects.js";
+import { instanceSettingsService } from "../services/instance-settings.js";
 import { assertCompanyAccess, getActorInfo } from "./authz.js";
 import {
   buildWorkspaceRuntimeDesiredStatePatch,
@@ -46,6 +48,10 @@ export function projectRoutes(db: Db) {
   const access = accessService(db);
   const secretsSvc = secretService(db);
   const workspaceOperations = workspaceOperationService(db);
+  const instanceSettings = instanceSettingsService(db);
+  const externalObjectsSvc = externalObjectService(db, {
+    enabled: async () => (await instanceSettings.getExperimental()).enableExternalObjects === true,
+  });
   const strictSecretsMode = process.env.PAPERCLIP_SECRETS_STRICT_MODE === "true";
   const environmentsSvc = environmentService(db);
 
@@ -139,6 +145,18 @@ export function projectRoutes(db: Db) {
     assertCompanyAccess(req, project.companyId);
     if (!(await assertProjectReadAllowed(req, res, project))) return;
     res.json(project);
+  });
+
+  router.get("/projects/:id/external-object-summary", async (req, res) => {
+    const id = req.params.id as string;
+    const project = await svc.getById(id);
+    if (!project) {
+      res.status(404).json({ error: "Project not found" });
+      return;
+    }
+    assertCompanyAccess(req, project.companyId);
+    const summary = await externalObjectsSvc.getProjectSummary(project.id);
+    res.json(summary);
   });
 
   router.post("/companies/:companyId/projects", validate(createProjectSchema), async (req, res) => {
